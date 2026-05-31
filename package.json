@@ -1,0 +1,36 @@
+{
+    "author": "MakeAwesomeHappen",
+    "dependencies": {},
+    "keywords": [
+        "pebble-app"
+    ],
+    "name": "folding-watch-pic",
+    "pebble": {
+        "capabilities": [
+            "configurable"
+        ],
+        "displayName": "Folding watch pic",
+        "enableMultiJS": true,
+        "messageKeys": [],
+        "projectType": "native",
+        "resources": {
+            "media": [
+                {
+                    "file": "fonts/BrelaDigits_45.otf",
+                    "name": "BrelaDigits_45",
+                    "targetPlatforms": null,
+                    "type": "font"
+                }
+            ]
+        },
+        "sdkVersion": "3",
+        "targetPlatforms": [
+            "emery"
+        ],
+        "uuid": "feaf41a2-829d-4065-9bd3-9af7ebcfe3fb",
+        "watchapp": {
+            "watchface": true
+        }
+    },
+    "version": "1.0.0"
+}
