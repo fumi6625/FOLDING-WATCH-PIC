@@ -9,13 +9,13 @@
  *   分と同じ「12時位置の数字が現在値」という仕組みを時にも適用する。
  *   読み取り位置が縦に2つ並ぶだけになり、視線移動がほぼ無くなる。
  *
- * 構成 (中心 CX,CY からの半径):
- *   r=113  分リングの数字  → 12時位置 (CX,34) が現在の分
+ * 構成 (中心 CX,CY=(120,78) からの半径。読み取りは6時側=下方向。時が上・分が下の順で並ぶ):
+ *   r=61   時リングの数字  → 6時位置 (CX,139)、実際の数字は15px下の y=154
  *   r=99   分リングの目盛り (60本)
- *   r=61   時リングの数字  → 12時位置 (CX,86) が現在の時
+ *   r=113  分リングの数字  → 6時位置 (CX,191)、実際の数字は15px下の y=206
  *   r=39   バッテリー弧 (幅5px, 左半分) + 12時側から画面右端への水平延長線
  *   中央   BATTERY ラベルと残量の数値
- *   y=56..64  時と分の隙間の色帯 (スマホから色を設定)
+ *   y=176..184  時と分の数字の隙間の色帯 (スマホから色を設定)
  *
  * 設定 (スマホの Pebble アプリ):
  *   BG_WHITE    背景 黒(0) / 白(1)
@@ -33,7 +33,7 @@
 #define SCREEN_H  228
 
 #define CX        120
-#define CY        147
+#define CY         78   // 検討時のCY=88(時上/分下への反転案)から、さらに10px上げた値
 
 // ── 分リング ──────────────────────────────────────────────
 #define MIN_RING_R       99
@@ -54,18 +54,27 @@
 #define BAT_W             5      // 残量によらず一定。残量は色と数値で表す
 
 // ── 読み取り位置 ──────────────────────────────────────────
-#define MIN_READ_CY   (CY - MIN_NUM_R)    //  34
-#define HOUR_READ_CY  (CY - HOUR_NUM_R)   //  85
+// 6時側 (CY + 半径) にしたので、半径が小さい時リングが上、大きい分リングが下になる。
+// リング自体はここ (139/191)、大きい数字はさらに DIGIT_OFFSET だけ下にずらして描く。
+#define MIN_READ_CY   (CY + MIN_NUM_R)    // 191
+#define HOUR_READ_CY  (CY + HOUR_NUM_R)   // 139
+#define DIGIT_OFFSET   15                 // 数字だけ下げる量 (下端余白 2px まで)
+#define MIN_DIGIT_CY   (MIN_READ_CY  + DIGIT_OFFSET)   // 206
+#define HOUR_DIGIT_CY  (HOUR_READ_CY + DIGIT_OFFSET)   // 154
 
 // 読み取り位置に来るリングのラベルは描かない (大きい数字と二重になるため)
 #define GHOST_DX   34
 #define GHOST_DY   26
 
+// 上端の "pebble" ロゴと重なるラベルは間引く
+#define PEBBLE_CY    12
+#define PEBBLE_DX    46
+#define PEBBLE_DY    14
+
 // ── 色帯 ──────────────────────────────────────────────────
-// 分の字形の下端と時の字形の上端の隙間に収める。
-// 読み取り y=34 と y=86、字形 約40px を見込むと 14..54 と 66..106。
+// 時の数字(y=154)の下端と分の数字(y=206)の上端の隙間に収める。
 #define BAND_X    90
-#define BAND_Y    56
+#define BAND_Y   176
 #define BAND_H     9
 
 // ── アニメーション ────────────────────────────────────────
@@ -207,46 +216,53 @@ static void draw_text_mid(GContext *ctx, const char *text, GFont font,
 
 // ── 描画 ──────────────────────────────────────────────────
 
-// 時リング: hour_deg だけ逆回転させると12時位置に現在の時が来る
+// 読み取り位置に来たか、"pebble" ロゴや色帯と重なるかを判定する。
+// 該当すればラベルは描かない (大きい数字/ロゴ/帯の上に暗い文字が埋もれるため)。
+static bool label_should_skip(GPoint p, int read_cy) {
+  if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - read_cy) < GHOST_DY) {
+    return true;
+  }
+  if (p.x > BAND_X - 14 && p.y > BAND_Y - 15 && p.y < BAND_Y + BAND_H + 15) {
+    return true;
+  }
+  if (iabs(p.y - PEBBLE_CY) < PEBBLE_DY && iabs(p.x - CX) < PEBBLE_DX) {
+    return true;
+  }
+  return false;
+}
+
+// 時リング: 読み取りは6時側 (+180°)。hour_deg だけ逆回転させると
+// 6時位置に現在の時が来る。
 static void draw_hour_ring(GContext *ctx, int hour_deg) {
   graphics_context_set_stroke_color(ctx, s_label);
   graphics_context_set_stroke_width(ctx, 2);
   for (int i = 0; i < 12; i++) {
-    int ang = i * 30 - hour_deg;
+    int ang = i * 30 - hour_deg + 180;
     graphics_draw_line(ctx,
                        polar_pt(CX, CY, HOUR_TICK_OUT, ang),
                        polar_pt(CX, CY, HOUR_TICK_IN,  ang));
   }
   for (int i = 0; i < 12; i++) {
-    GPoint p = polar_pt(CX, CY, HOUR_NUM_R, i * 30 - hour_deg);
-    if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - HOUR_READ_CY) < GHOST_DY) {
-      continue;
-    }
+    GPoint p = polar_pt(CX, CY, HOUR_NUM_R, i * 30 - hour_deg + 180);
+    if (label_should_skip(p, HOUR_DIGIT_CY)) continue;
     draw_text_mid(ctx, s_hour_labels[i], s_font_14b, s_label, p.x, p.y, 30, DY_SYS);
   }
 }
 
-// 分リング: 60本の目盛りと12個の数字
+// 分リング: 60本の目盛りと12個の数字。読み取りは6時側 (+180°)
 static void draw_minute_ring(GContext *ctx, int min_deg) {
   graphics_context_set_stroke_color(ctx, s_ink);
   graphics_context_set_stroke_width(ctx, 2);
   for (int i = 0; i < 60; i++) {
-    int  ang = i * 6 - min_deg;
+    int  ang = i * 6 - min_deg + 180;
     bool maj = (i % 5 == 0);
     graphics_draw_line(ctx,
         polar_pt(CX, CY, MIN_RING_R, ang),
         polar_pt(CX, CY, maj ? MIN_TICK_MAJ_R : MIN_TICK_MIN_R, ang));
   }
   for (int i = 0; i < 12; i++) {
-    GPoint p = polar_pt(CX, CY, MIN_NUM_R, i * 30 - min_deg);
-    if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - MIN_READ_CY) < GHOST_DY) {
-      continue;
-    }
-    // 帯に重なるラベルも描かない。暗いグレーが色帯に埋もれて読めなくなる
-    if (p.x > BAND_X - 14 &&
-        p.y > BAND_Y - 15 && p.y < BAND_Y + BAND_H + 15) {
-      continue;
-    }
+    GPoint p = polar_pt(CX, CY, MIN_NUM_R, i * 30 - min_deg + 180);
+    if (label_should_skip(p, MIN_DIGIT_CY)) continue;
     draw_text_mid(ctx, s_min_labels[i], s_font_24b, s_label, p.x, p.y, 34, DY_SYS);
   }
 }
@@ -337,22 +353,23 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     char mbuf[8], hbuf[8];
     snprintf(mbuf, sizeof(mbuf), "%02d", disp_min == 0 ? 60 : disp_min);
     snprintf(hbuf, sizeof(hbuf), "%d",  disp_hour == 0 ? 12 : disp_hour);
-    draw_text_mid(ctx, mbuf, s_font_big, s_ink, CX, MIN_READ_CY,  100, DY_BIG);
-    draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_READ_CY, 100, DY_BIG);
+    draw_text_mid(ctx, mbuf, s_font_big, s_ink, CX, MIN_DIGIT_CY,  100, DY_BIG);
+    draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_DIGIT_CY, 100, DY_BIG);
   }
 
-  // 日付・曜日 (左上、分リング r=113 の外側)
+  // 日付・曜日 (左下、分リング r=113 の外側。分の数字が下に来たため)
   {
     char dbuf[8];
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
-    draw_text_mid(ctx, dbuf, s_font_24b, s_sub, 28, 18, 44, DY_SYS);
-    draw_text_mid(ctx, s_day_names[s_wday], s_font_09, s_label, 28, 38, 44, DY_SYS);
+    draw_text_mid(ctx, dbuf, s_font_24b, s_sub, 28, SCREEN_H - 30, 44, DY_SYS);
+    draw_text_mid(ctx, s_day_names[s_wday], s_font_09, s_label,
+                 28, SCREEN_H - 12, 44, DY_SYS);
   }
 
-  // pebble: 時分と同じ縦ライン上、画面下端。リングのラベルを背景色で打ち抜く
+  // pebble: 時分と同じ縦ライン上、画面上端。リングのラベルを背景色で打ち抜く
   graphics_context_set_fill_color(ctx, s_bg);
-  graphics_fill_rect(ctx, GRect(CX - 32, SCREEN_H - 22, 64, 20), 0, GCornerNone);
-  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, CX, SCREEN_H - 12, 64, DY_SYS);
+  graphics_fill_rect(ctx, GRect(CX - 32, PEBBLE_CY - 10, 64, 20), 0, GCornerNone);
+  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, CX, PEBBLE_CY, 64, DY_SYS);
 }
 
 // ── アニメーション ────────────────────────────────────────
