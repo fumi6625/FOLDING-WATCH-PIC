@@ -12,10 +12,10 @@
  * 構成 (中心 CX,CY からの半径):
  *   r=113  分リングの数字  → 12時位置 (CX,34) が現在の分
  *   r=99   分リングの目盛り (60本)
- *   r=62   時リングの数字  → 12時位置 (CX,85) が現在の時
+ *   r=61   時リングの数字  → 12時位置 (CX,86) が現在の時
  *   r=39   バッテリー弧 (幅5px, 左半分) + 12時側から画面右端への水平延長線
  *   中央   BATTERY ラベルと残量の数値
- *   y=52..65  時と分の隙間の色帯 (スマホから色を設定)
+ *   y=56..64  時と分の隙間の色帯 (スマホから色を設定)
  *
  * 設定 (スマホの Pebble アプリ):
  *   BG_WHITE    背景 黒(0) / 白(1)
@@ -42,9 +42,12 @@
 #define MIN_NUM_R       113
 
 // ── 時リング (旧・日付リングを置換) ────────────────────────
-#define HOUR_NUM_R       62
-#define HOUR_TICK_OUT    50
-#define HOUR_TICK_IN     44
+// 縦の予算は「分の読取(34) 〜 バッテリー水平線(108)」の 74px で固定。
+// 1.5 * 字形高 <= 74 - 帯高 なので、字形は 43px あたりが上限。
+// 時リングを内外に動かしても総予算は変わらない (下げるとバッテリー線に当たる)。
+#define HOUR_NUM_R       61
+#define HOUR_TICK_OUT    52
+#define HOUR_TICK_IN     45
 
 // ── バッテリー ────────────────────────────────────────────
 #define BAT_R_OUT        39
@@ -59,9 +62,11 @@
 #define GHOST_DY   26
 
 // ── 色帯 ──────────────────────────────────────────────────
+// 分の字形の下端と時の字形の上端の隙間に収める。
+// 読み取り y=34 と y=86、字形 約40px を見込むと 14..54 と 66..106。
 #define BAND_X    90
-#define BAND_Y    52
-#define BAND_H    14
+#define BAND_Y    56
+#define BAND_H     9
 
 // ── アニメーション ────────────────────────────────────────
 #define ANIM_DURATION_MS  1200
@@ -77,7 +82,7 @@
 static Window *s_window;
 static Layer  *s_canvas_layer;
 
-static GFont s_font_big;      // BrelaDigits_45 — 時・分の数字
+static GFont s_font_big;      // BrelaDigits_50 — 時・分の数字
 static GFont s_font_mid;      // BrelaDigits_24 — バッテリーの数値
 static GFont s_font_24b;      // 分リングのラベル / 日付
 static GFont s_font_14b;      // 時リングのラベル / pebble
@@ -179,17 +184,26 @@ static GColor bat_color(int pct) {
 }
 
 // テキストを (cx, cy) に上下中央で描く。
-// graphics_draw_text は矩形の上端から描くので、実寸を測ってから中央に置く。
+// graphics_draw_text は矩形の上端から描く。content_size の高さにはディセント
+// (数字には存在しない下の余白) が含まれるため、それだけで中央を取ると字形が
+// 下にずれる。dy でフォントごとに補正する。
+// 旧版は BrelaDigits_45 に対し「中心 -32、高さ52」を実機で調整済みだった。
+// これは content_size の半分より約6px 上、つまりフォント高の約13%にあたる。
 static void draw_text_mid(GContext *ctx, const char *text, GFont font,
-                          GColor color, int cx, int cy, int box_w) {
-  GRect probe = GRect(cx - box_w / 2, cy - 50, box_w, 100);
+                          GColor color, int cx, int cy, int box_w, int dy) {
+  GRect probe = GRect(cx - box_w / 2, cy - 60, box_w, 120);
   GSize sz = graphics_text_layout_get_content_size(
       text, font, probe, GTextOverflowModeWordWrap, GTextAlignmentCenter);
   graphics_context_set_text_color(ctx, color);
   graphics_draw_text(ctx, text, font,
-                     GRect(cx - box_w / 2, cy - sz.h / 2, box_w, sz.h + 4),
+                     GRect(cx - box_w / 2, cy - sz.h / 2 + dy, box_w, sz.h + 4),
                      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 }
+
+// フォント高の約13%。実機で字形が上下にずれる場合はここを増減させる
+#define DY_BIG   (-7)    // BrelaDigits_50
+#define DY_MID   (-3)    // BrelaDigits_24
+#define DY_SYS     0     // Gothic 系は content_size の半分でほぼ合う
 
 // ── 描画 ──────────────────────────────────────────────────
 
@@ -208,7 +222,7 @@ static void draw_hour_ring(GContext *ctx, int hour_deg) {
     if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - HOUR_READ_CY) < GHOST_DY) {
       continue;
     }
-    draw_text_mid(ctx, s_hour_labels[i], s_font_14b, s_label, p.x, p.y, 30);
+    draw_text_mid(ctx, s_hour_labels[i], s_font_14b, s_label, p.x, p.y, 30, DY_SYS);
   }
 }
 
@@ -228,7 +242,12 @@ static void draw_minute_ring(GContext *ctx, int min_deg) {
     if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - MIN_READ_CY) < GHOST_DY) {
       continue;
     }
-    draw_text_mid(ctx, s_min_labels[i], s_font_24b, s_label, p.x, p.y, 34);
+    // 帯に重なるラベルも描かない。暗いグレーが色帯に埋もれて読めなくなる
+    if (p.x > BAND_X - 14 &&
+        p.y > BAND_Y - 15 && p.y < BAND_Y + BAND_H + 15) {
+      continue;
+    }
+    draw_text_mid(ctx, s_min_labels[i], s_font_24b, s_label, p.x, p.y, 34, DY_SYS);
   }
 }
 
@@ -257,8 +276,8 @@ static void draw_battery(GContext *ctx, int pct,
   if (shown_pct >= 0) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", shown_pct);
-    draw_text_mid(ctx, "BATTERY", s_font_09, s_sub, CX, CY - 9, 70);
-    draw_text_mid(ctx, buf, s_font_mid, bc, CX, CY + 13, 60);
+    draw_text_mid(ctx, "BATTERY", s_font_09, s_sub, CX, CY - 9, 70, DY_SYS);
+    draw_text_mid(ctx, buf, s_font_mid, bc, CX, CY + 13, 60, DY_MID);
   }
 }
 
@@ -318,22 +337,22 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     char mbuf[8], hbuf[8];
     snprintf(mbuf, sizeof(mbuf), "%02d", disp_min == 0 ? 60 : disp_min);
     snprintf(hbuf, sizeof(hbuf), "%d",  disp_hour == 0 ? 12 : disp_hour);
-    draw_text_mid(ctx, mbuf, s_font_big, s_ink, CX, MIN_READ_CY,  90);
-    draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_READ_CY, 90);
+    draw_text_mid(ctx, mbuf, s_font_big, s_ink, CX, MIN_READ_CY,  100, DY_BIG);
+    draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_READ_CY, 100, DY_BIG);
   }
 
   // 日付・曜日 (左上、分リング r=113 の外側)
   {
     char dbuf[8];
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
-    draw_text_mid(ctx, dbuf, s_font_24b, s_sub, 28, 18, 44);
-    draw_text_mid(ctx, s_day_names[s_wday], s_font_09, s_label, 28, 38, 44);
+    draw_text_mid(ctx, dbuf, s_font_24b, s_sub, 28, 18, 44, DY_SYS);
+    draw_text_mid(ctx, s_day_names[s_wday], s_font_09, s_label, 28, 38, 44, DY_SYS);
   }
 
   // pebble: 時分と同じ縦ライン上、画面下端。リングのラベルを背景色で打ち抜く
   graphics_context_set_fill_color(ctx, s_bg);
   graphics_fill_rect(ctx, GRect(CX - 32, SCREEN_H - 22, 64, 20), 0, GCornerNone);
-  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, CX, SCREEN_H - 12, 64);
+  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, CX, SCREEN_H - 12, 64, DY_SYS);
 }
 
 // ── アニメーション ────────────────────────────────────────
@@ -411,7 +430,7 @@ static void battery_handler(BatteryChargeState state) {
 // ── Window ────────────────────────────────────────────────
 static void window_load(Window *window) {
   s_font_big = fonts_load_custom_font(
-      resource_get_handle(RESOURCE_ID_BrelaDigits_45));
+      resource_get_handle(RESOURCE_ID_BrelaDigits_50));
   s_font_mid = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_BrelaDigits_24));
   s_font_24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
