@@ -1,19 +1,36 @@
 /*
- * Ressence Type 3 Clone - Concentric Ring Design v7
+ * FOLDING WATCH PIC — 視認性優先リデザイン (v2)
  * Pebble Emery (200x228) / SDK 3
  *
- * 背景画像機能追加版:
- *   - スマホからPNG画像を4bpp(16色)で受信して全画面背景表示
- *   - AppMessage + persistent storage で画像を保持
- *   - 起動アニメーション廃止 → メモリ節約
- *   - ハーフトーンマップ廃止 → メモリ節約
+ * 設計方針:
+ *   旧版は「分」が45ptの数字なのに「時」は半径39pxのダイヤル上の3px幅の針1本で、
+ *   数字目盛りも無かった。角度→数字の変換が必要で、瞬時に読めなかった。
+ *   そこで、回転しない日付リング(31個の数字)を「時リング」に置き換え、
+ *   分と同じ「12時位置の数字が現在値」という仕組みを時にも適用する。
+ *   読み取り位置が縦に2つ並ぶだけになり、視線移動がほぼ無くなる。
+ *
+ * 構成 (中心 CX,CY からの半径):
+ *   r=113  分リングの数字  → 12時位置 (CX,34) が現在の分
+ *   r=99   分リングの目盛り (60本)
+ *   r=62   時リングの数字  → 12時位置 (CX,85) が現在の時
+ *   r=39   バッテリー弧 (幅5px, 左半分) + 12時側から画面右端への水平延長線
+ *   中央   BATTERY ラベルと残量の数値
+ *   y=52..65  時と分の隙間の色帯 (スマホから色を設定)
+ *
+ * 設定 (スマホの Pebble アプリ):
+ *   BG_WHITE    背景 黒(0) / 白(1)
+ *   BAND_COLOR  帯の色 (GColor8 の argb 値)
+ *   前景色は背景から自動導出する。白地に白文字のような組合せを作らせないため。
+ *
+ * 電力:
+ *   更新は MINUTE_UNIT の1分ごと。起動時のみ AppTimer を約1.2秒回す。
  */
 
 #include <pebble.h>
 
-// ── 画面サイズ定数 ────────────────────────────────────────
-#define SCREEN_W  260
-#define SCREEN_H  260
+// ── 画面 ─────────────────────────────────────────────────
+#define SCREEN_W  200
+#define SCREEN_H  228
 
 #define CX        120
 #define CY        147
@@ -24,84 +41,72 @@
 #define MIN_TICK_MIN_R   95
 #define MIN_NUM_R       113
 
-// ── 日付リング ────────────────────────────────────────────
-#define DATE_RING_R    92
-#define DATE_TEXT_R    75
+// ── 時リング (旧・日付リングを置換) ────────────────────────
+#define HOUR_NUM_R       62
+#define HOUR_TICK_OUT    50
+#define HOUR_TICK_IN     44
 
-// ── バッテリー/万歩計リング ───────────────────────────────
-#define BAT_R_OUT     65
-#define BAT_R_IN      39
+// ── バッテリー ────────────────────────────────────────────
+#define BAT_R_OUT        39
+#define BAT_W             5      // 残量によらず一定。残量は色と数値で表す
 
-#define SEC_ARC_GOAL  60
+// ── 読み取り位置 ──────────────────────────────────────────
+#define MIN_READ_CY   (CY - MIN_NUM_R)    //  34
+#define HOUR_READ_CY  (CY - HOUR_NUM_R)   //  85
 
-// ── 時針ダイアル ──────────────────────────────────────────
-#define HOUR_R          39
-#define HOUR_TICK_OUT   36
-#define HOUR_TICK_MAJ   29
-#define HOUR_TICK_MIN   31
-#define HOUR_HAND_LEN   37
-#define HOUR_HAND_TAIL   6
+// 読み取り位置に来るリングのラベルは描かない (大きい数字と二重になるため)
+#define GHOST_DX   34
+#define GHOST_DY   26
 
-// ── フレームレート ────────────────────────────────────────
-#define FRAME_INTERVAL_MS   16
-#define MIN_ROTATE_INTERVAL 2
+// ── 色帯 ──────────────────────────────────────────────────
+#define BAND_X    90
+#define BAND_Y    52
+#define BAND_H    14
 
-// ── 背景画像 ─────────────────────────────────────────────
-#define BG_W             200
-#define BG_H             228
-#define BG_ROW_BYTES     100    // 200px × 4bpp / 8 = 100 bytes/row
-#define BG_PIXEL_BYTES   22800  // BG_ROW_BYTES × BG_H
-#define BG_CHUNK_SIZE    3800   // < 4096 (persist_write_data 上限)
-#define BG_NUM_CHUNKS    6      // ceil(22800 / 3800) = 6
+// ── アニメーション ────────────────────────────────────────
+#define ANIM_DURATION_MS  1200
+#define ANIM_INTERVAL_MS    33
 
-// AppMessage キー (package.json の messageKeys 順と一致)
-#define MSG_KEY_IMG_CHUNK_IDX  0
-#define MSG_KEY_IMG_DATA       1
-#define MSG_KEY_IMG_DONE       2
-#define MSG_KEY_IMG_REQUEST    3
-#define MSG_KEY_IMG_PALETTE    4
+// ── 設定の保存キー ────────────────────────────────────────
+#define PERSIST_KEY_BG_WHITE    10
+#define PERSIST_KEY_BAND_COLOR  11
 
-// persistent storage キー
-#define PERSIST_KEY_BG_DONE    100
-#define PERSIST_KEY_BG_PALETTE 200
-// キー 0〜5: 画像ピクセルチャンク
+#define DEFAULT_BAND_ARGB  0xF4   // (255, 85, 0) オレンジ
 
-// ── グローバル変数 ──────────────────────────────────────
-static Window  *s_window;
-static Layer   *s_canvas_layer;
+// ── グローバル ────────────────────────────────────────────
+static Window *s_window;
+static Layer  *s_canvas_layer;
 
-static GFont s_font_14b;
-static GFont s_font_18b;
-static GFont s_font_24b;
-static GFont s_font_28b;
-static GFont s_font_BrelaDigits_45;
+static GFont s_font_big;      // BrelaDigits_45 — 時・分の数字
+static GFont s_font_mid;      // BrelaDigits_24 — バッテリーの数値
+static GFont s_font_24b;      // 分リングのラベル / 日付
+static GFont s_font_14b;      // 時リングのラベル / pebble
+static GFont s_font_09;       // BATTERY / 曜日
 
-static int  s_min, s_sec, s_hour, s_wday, s_mday;
-static int  s_battery_pct = 100;
-static int  s_step_count  = 0;
-static bool s_show_steps  = false;
+static int s_hour, s_min, s_wday, s_mday;
+static int s_battery_pct = 100;
 
-// 分目盛り色
-#define TICK_COLOR_COUNT 7
-static int s_tick_color_idx = 0;
-static const uint8_t s_tick_color_argb[TICK_COLOR_COUNT] = {
-  GColorWhiteARGB8,
-  GColorYellowARGB8,
-  GColorCyanARGB8,
-  GColorMintGreenARGB8,
-  GColorOrangeARGB8,
-  GColorLightGrayARGB8,
-  GColorRedARGB8,
+static bool    s_bg_white  = false;
+static uint8_t s_band_argb = DEFAULT_BAND_ARGB;
+
+// 背景から導出する前景3階層
+static GColor s_bg, s_ink, s_label, s_sub;
+
+static bool      s_animating    = false;
+static int       s_anim_elapsed = 0;
+static AppTimer *s_anim_timer   = NULL;
+
+static const char *s_min_labels[12] = {
+  "60","5","10","15","20","25","30","35","40","45","50","55"
+};
+static const char *s_hour_labels[12] = {
+  "12","1","2","3","4","5","6","7","8","9","10","11"
+};
+static const char *s_day_names[7] = {
+  "SUN","MON","TUE","WED","THU","FRI","SAT"
 };
 
-static AppTimer *s_frame_timer = NULL;
-
-// 背景画像
-static GBitmap *s_bg_bitmap = NULL;
-static GColor   s_bg_palette[16];
-static bool     s_bg_ready  = false;
-
-// ── ユーティリティ ──────────────────────────────────────
+// ── ユーティリティ ────────────────────────────────────────
 
 static GPoint polar_pt(int cx, int cy, int r, int angle_deg) {
   int32_t norm = angle_deg % 360;
@@ -113,464 +118,346 @@ static GPoint polar_pt(int cx, int cy, int r, int angle_deg) {
   );
 }
 
-// ── バッテリー色 ──────────────────────────────────────────
+static int iabs(int v) { return v < 0 ? -v : v; }
+
+// 区間 [a,b] の進捗を 0..1000 で返す
+static int32_t seg(int32_t t, int32_t a, int32_t b) {
+  if (t <= a) return 0;
+  if (t >= b) return 1000;
+  return (t - a) * 1000 / (b - a);
+}
+
+static int32_t ease_in_out(int32_t t) {
+  if (t < 500) return 2 * t * t / 1000;
+  return -1000 + (4000 - 2 * t) * t / 1000;
+}
+
+static int32_t ease_out_back(int32_t t) {
+  int32_t tm1   = t - 1000;
+  int32_t tm1_2 = tm1 * tm1 / 1000;
+  int32_t tm1_3 = tm1_2 * tm1 / 1000;
+  return 1000 + 2702 * tm1_3 / 1000 + 1702 * tm1_2 / 1000;
+}
+
+// 0 から deg へ向かう最短角 (180°を超えるなら逆回転)
+static int32_t shortest(int32_t deg) {
+  return (deg > 180) ? deg - 360 : deg;
+}
+
+// 背景から前景3階層を決める
+static void apply_palette(void) {
+  if (s_bg_white) {
+    s_bg    = GColorWhite;
+    s_ink   = GColorBlack;       // 数字・分リングの目盛り
+    s_label = GColorLightGray;   // リングのラベル (テクスチャ)
+    s_sub   = GColorDarkGray;    // 日付・曜日・BATTERY
+  } else {
+    s_bg    = GColorBlack;
+    s_ink   = GColorWhite;
+    s_label = GColorDarkGray;
+    s_sub   = GColorLightGray;
+  }
+}
+
+// バッテリー色。白背景では明るい色が飛ぶので濃い側の5色に差し替える
 static GColor bat_color(int pct) {
-  if (pct >= 85) return GColorCyan;
-  if (pct >= 60) return GColorMintGreen;
-  if (pct >= 40) return GColorYellow;
-  if (pct >= 20) return GColorOrange;
-  return GColorRed;
+  GColor c;
+  if (s_bg_white) {
+    if      (pct >= 85) c.argb = 0xCA;   // (0,170,170)   ティール
+    else if (pct >= 60) c.argb = 0xC8;   // (0,170,0)     グリーン
+    else if (pct >= 40) c.argb = 0xE8;   // (170,170,0)   オリーブ
+    else if (pct >= 20) c.argb = 0xE4;   // (170,85,0)    ブラウン
+    else                c.argb = 0xF0;   // (255,0,0)     レッド
+  } else {
+    if      (pct >= 85) c.argb = 0xCF;   // (0,255,255)   シアン
+    else if (pct >= 60) c.argb = 0xDE;   // (170,255,170) ミント
+    else if (pct >= 40) c.argb = 0xFC;   // (255,255,0)   イエロー
+    else if (pct >= 20) c.argb = 0xF8;   // (255,170,0)   オレンジ
+    else                c.argb = 0xF0;   // (255,0,0)     レッド
+  }
+  return c;
 }
 
-// ── 背景画像 ─────────────────────────────────────────────
-
-static void create_bg_bitmap_if_needed(void) {
-  if (!s_bg_bitmap) {
-    s_bg_bitmap = gbitmap_create_blank(GSize(BG_W, BG_H), GBitmapFormat4BitPalette);
-  }
+// テキストを (cx, cy) に上下中央で描く。
+// graphics_draw_text は矩形の上端から描くので、実寸を測ってから中央に置く。
+static void draw_text_mid(GContext *ctx, const char *text, GFont font,
+                          GColor color, int cx, int cy, int box_w) {
+  GRect probe = GRect(cx - box_w / 2, cy - 50, box_w, 100);
+  GSize sz = graphics_text_layout_get_content_size(
+      text, font, probe, GTextOverflowModeWordWrap, GTextAlignmentCenter);
+  graphics_context_set_text_color(ctx, color);
+  graphics_draw_text(ctx, text, font,
+                     GRect(cx - box_w / 2, cy - sz.h / 2, box_w, sz.h + 4),
+                     GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 }
 
-static void apply_bg_palette(void) {
-  if (s_bg_bitmap) {
-    gbitmap_set_palette(s_bg_bitmap, s_bg_palette, false);
+// ── 描画 ──────────────────────────────────────────────────
+
+// 時リング: hour_deg だけ逆回転させると12時位置に現在の時が来る
+static void draw_hour_ring(GContext *ctx, int hour_deg) {
+  graphics_context_set_stroke_color(ctx, s_label);
+  graphics_context_set_stroke_width(ctx, 2);
+  for (int i = 0; i < 12; i++) {
+    int ang = i * 30 - hour_deg;
+    graphics_draw_line(ctx,
+                       polar_pt(CX, CY, HOUR_TICK_OUT, ang),
+                       polar_pt(CX, CY, HOUR_TICK_IN,  ang));
   }
-}
-
-static void load_bg_from_persist(void) {
-  if (!persist_exists(PERSIST_KEY_BG_DONE)) return;
-
-  create_bg_bitmap_if_needed();
-  if (!s_bg_bitmap) return;
-
-  // パレット読み込み
-  if (persist_exists(PERSIST_KEY_BG_PALETTE)) {
-    persist_read_data(PERSIST_KEY_BG_PALETTE, s_bg_palette, sizeof(s_bg_palette));
-    apply_bg_palette();
-  }
-
-  // ピクセルデータ読み込み (6チャンク)
-  uint8_t *dst = gbitmap_get_data(s_bg_bitmap);
-  if (!dst) return;
-
-  uint32_t offset = 0;
-  for (int k = 0; k < BG_NUM_CHUNKS; k++) {
-    if (!persist_exists(k)) break;
-    int n = persist_read_data(k, dst + offset, BG_CHUNK_SIZE);
-    if (n <= 0) break;
-    offset += (uint32_t)n;
-  }
-
-  s_bg_ready = true;
-}
-
-static void inbox_received_handler(DictionaryIterator *iter, void *context) {
-  Tuple *palette_t    = dict_find(iter, MSG_KEY_IMG_PALETTE);
-  Tuple *chunk_idx_t  = dict_find(iter, MSG_KEY_IMG_CHUNK_IDX);
-  Tuple *data_t       = dict_find(iter, MSG_KEY_IMG_DATA);
-  Tuple *done_t       = dict_find(iter, MSG_KEY_IMG_DONE);
-
-  // パレット受信
-  if (palette_t && palette_t->length >= 16) {
-    create_bg_bitmap_if_needed();
-    memcpy(s_bg_palette, palette_t->value->data, 16);
-    apply_bg_palette();
-    persist_write_data(PERSIST_KEY_BG_PALETTE, s_bg_palette, 16);
-  }
-
-  // ピクセルチャンク受信
-  if (chunk_idx_t && data_t) {
-    create_bg_bitmap_if_needed();
-    uint8_t idx = chunk_idx_t->value->uint8;
-    if (idx < BG_NUM_CHUNKS) {
-      uint8_t  *src = (uint8_t *)data_t->value->data;
-      uint16_t  len = data_t->length;
-
-      // GBitmap の内部バッファに直接書き込み (コピー不要)
-      uint8_t *pixel_dst = gbitmap_get_data(s_bg_bitmap);
-      if (pixel_dst) {
-        uint32_t offset = (uint32_t)idx * BG_CHUNK_SIZE;
-        if (offset + len <= BG_PIXEL_BYTES) {
-          memcpy(pixel_dst + offset, src, len);
-        }
-      }
-      // persist に保存
-      persist_write_data((uint32_t)idx, src, len);
+  for (int i = 0; i < 12; i++) {
+    GPoint p = polar_pt(CX, CY, HOUR_NUM_R, i * 30 - hour_deg);
+    if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - HOUR_READ_CY) < GHOST_DY) {
+      continue;
     }
+    draw_text_mid(ctx, s_hour_labels[i], s_font_14b, s_label, p.x, p.y, 30);
+  }
+}
+
+// 分リング: 60本の目盛りと12個の数字
+static void draw_minute_ring(GContext *ctx, int min_deg) {
+  graphics_context_set_stroke_color(ctx, s_ink);
+  graphics_context_set_stroke_width(ctx, 2);
+  for (int i = 0; i < 60; i++) {
+    int  ang = i * 6 - min_deg;
+    bool maj = (i % 5 == 0);
+    graphics_draw_line(ctx,
+        polar_pt(CX, CY, MIN_RING_R, ang),
+        polar_pt(CX, CY, maj ? MIN_TICK_MAJ_R : MIN_TICK_MIN_R, ang));
+  }
+  for (int i = 0; i < 12; i++) {
+    GPoint p = polar_pt(CX, CY, MIN_NUM_R, i * 30 - min_deg);
+    if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - MIN_READ_CY) < GHOST_DY) {
+      continue;
+    }
+    draw_text_mid(ctx, s_min_labels[i], s_font_24b, s_label, p.x, p.y, 34);
+  }
+}
+
+// バッテリー: 6時位置(Pebble角180°)を起点に左側を通って12時位置(360°)まで伸びる弧。
+// そのあと line1000 に応じて12時側の端から画面右端まで水平に延長する。
+static void draw_battery(GContext *ctx, int pct,
+                         int32_t sweep1000, int32_t line1000, int shown_pct) {
+  GColor bc = bat_color(pct);
+
+  if (sweep1000 > 0) {
+    GRect r = GRect(CX - BAT_R_OUT, CY - BAT_R_OUT,
+                    BAT_R_OUT * 2, BAT_R_OUT * 2);
+    int32_t end_deg = 180 + 180 * sweep1000 / 1000;
+    graphics_context_set_fill_color(ctx, bc);
+    graphics_fill_radial(ctx, r, GOvalScaleModeFitCircle, BAT_W,
+                         DEG_TO_TRIGANGLE(180), DEG_TO_TRIGANGLE(end_deg));
   }
 
-  // 転送完了
-  if (done_t) {
-    s_bg_ready = true;
-    persist_write_int(PERSIST_KEY_BG_DONE, 1);
+  if (line1000 > 0) {
+    int len = (SCREEN_W - CX) * line1000 / 1000;
+    graphics_context_set_fill_color(ctx, bc);
+    graphics_fill_rect(ctx, GRect(CX, CY - BAT_R_OUT, len, BAT_W),
+                       0, GCornerNone);
+  }
+
+  if (shown_pct >= 0) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", shown_pct);
+    draw_text_mid(ctx, "BATTERY", s_font_09, s_sub, CX, CY - 9, 70);
+    draw_text_mid(ctx, buf, s_font_mid, bc, CX, CY + 13, 60);
+  }
+}
+
+// ── メイン描画 ────────────────────────────────────────────
+static void canvas_update_proc(Layer *layer, GContext *ctx) {
+  int min_deg, hour_deg, disp_min, disp_hour, shown_pct;
+  int32_t sweep1000, line1000;
+
+  if (s_animating) {
+    int32_t t = (int32_t)s_anim_elapsed * 1000 / ANIM_DURATION_MS;
+    if (t > 1000) t = 1000;
+
+    // リングは12時位置 (60 と 12) から最短回りで現在値へ
+    min_deg  = (int)(ease_in_out(seg(t, 0, 700)) * shortest(s_min * 6) / 1000);
+    hour_deg = (int)(ease_out_back(seg(t, 0, 580))
+                     * shortest((s_hour % 12) * 30) / 1000);
+
+    // 弧が下から上へ → 続けて水平線が右端へ
+    sweep1000 = ease_in_out(seg(t, 100, 600));
+    line1000  = ease_in_out(seg(t, 580, 880));
+    shown_pct = (t > 200)
+        ? (int)(s_battery_pct * ease_in_out(seg(t, 200, 800)) / 1000)
+        : -1;
+
+    // 数字はリングの現在位置に追従させる (回って数字が変わるのが見どころ)
+    disp_min  = ((min_deg  / 6)  % 60 + 60) % 60;
+    disp_hour = ((hour_deg / 30) % 12 + 12) % 12;
+  } else {
+    min_deg   = s_min * 6;
+    hour_deg  = (s_hour % 12) * 30;
+    sweep1000 = 1000;
+    line1000  = 1000;
+    shown_pct = s_battery_pct;
+    disp_min  = s_min;
+    disp_hour = s_hour % 12;
+  }
+
+  // 背景
+  graphics_context_set_fill_color(ctx, s_bg);
+  graphics_fill_rect(ctx, GRect(0, 0, SCREEN_W, SCREEN_H), 0, GCornerNone);
+
+  // 時と分の隙間の色帯
+  {
+    GColor band;
+    band.argb = s_band_argb;
+    graphics_context_set_fill_color(ctx, band);
+    graphics_fill_rect(ctx, GRect(BAND_X, BAND_Y, SCREEN_W - BAND_X, BAND_H),
+                       0, GCornerNone);
+  }
+
+  draw_battery(ctx, s_battery_pct, sweep1000, line1000, shown_pct);
+  draw_hour_ring(ctx, hour_deg);
+  draw_minute_ring(ctx, min_deg);
+
+  // 時・分の数字 (最上層)
+  {
+    char mbuf[8], hbuf[8];
+    snprintf(mbuf, sizeof(mbuf), "%02d", disp_min == 0 ? 60 : disp_min);
+    snprintf(hbuf, sizeof(hbuf), "%d",  disp_hour == 0 ? 12 : disp_hour);
+    draw_text_mid(ctx, mbuf, s_font_big, s_ink, CX, MIN_READ_CY,  90);
+    draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_READ_CY, 90);
+  }
+
+  // 日付・曜日 (左上、分リング r=113 の外側)
+  {
+    char dbuf[8];
+    snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
+    draw_text_mid(ctx, dbuf, s_font_24b, s_sub, 28, 18, 44);
+    draw_text_mid(ctx, s_day_names[s_wday], s_font_09, s_label, 28, 38, 44);
+  }
+
+  // pebble: 時分と同じ縦ライン上、画面下端。リングのラベルを背景色で打ち抜く
+  graphics_context_set_fill_color(ctx, s_bg);
+  graphics_fill_rect(ctx, GRect(CX - 32, SCREEN_H - 22, 64, 20), 0, GCornerNone);
+  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, CX, SCREEN_H - 12, 64);
+}
+
+// ── アニメーション ────────────────────────────────────────
+static void anim_tick(void *data) {
+  s_anim_elapsed += ANIM_INTERVAL_MS;
+  if (s_anim_elapsed >= ANIM_DURATION_MS) {
+    s_anim_elapsed = ANIM_DURATION_MS;
+    s_animating    = false;
+    s_anim_timer   = NULL;
+    layer_mark_dirty(s_canvas_layer);
+    return;
+  }
+  layer_mark_dirty(s_canvas_layer);
+  s_anim_timer = app_timer_register(ANIM_INTERVAL_MS, anim_tick, NULL);
+}
+
+static void start_animation(void) {
+  if (s_anim_timer) {
+    app_timer_cancel(s_anim_timer);
+    s_anim_timer = NULL;
+  }
+  s_animating    = true;
+  s_anim_elapsed = 0;
+  s_anim_timer   = app_timer_register(ANIM_INTERVAL_MS, anim_tick, NULL);
+}
+
+// ── 設定 ──────────────────────────────────────────────────
+static void inbox_received_handler(DictionaryIterator *iter, void *context) {
+  bool changed = false;
+
+  Tuple *t_bg = dict_find(iter, MESSAGE_KEY_BG_WHITE);
+  if (t_bg) {
+    s_bg_white = (t_bg->value->int32 != 0);
+    persist_write_int(PERSIST_KEY_BG_WHITE, s_bg_white ? 1 : 0);
+    changed = true;
+  }
+
+  Tuple *t_band = dict_find(iter, MESSAGE_KEY_BAND_COLOR);
+  if (t_band) {
+    s_band_argb = (uint8_t)(t_band->value->int32 & 0xFF);
+    persist_write_int(PERSIST_KEY_BAND_COLOR, s_band_argb);
+    changed = true;
+  }
+
+  if (changed) {
+    apply_palette();
     layer_mark_dirty(s_canvas_layer);
   }
 }
 
-// ── 描画 ──────────────────────────────────────────────
-
-static const char *s_min_labels[12] = {
-  "60","5","10","15","20","25","30","35","40","45","50","55"
-};
-
-static void draw_minute_ring(GContext *ctx, int min_deg) {
-  graphics_context_set_antialiased(ctx, true);
-
-  graphics_context_set_stroke_color(ctx,
-    (GColor){ .argb = s_tick_color_argb[s_tick_color_idx] });
-  graphics_context_set_stroke_width(ctx, 2);
-
-  for (int i = 0; i < 60; i++) {
-    int    ang = i * 6 - min_deg;
-    bool   maj = (i % 5 == 0);
-    GPoint p1  = polar_pt(CX, CY, MIN_RING_R, ang);
-    GPoint p2  = polar_pt(CX, CY, maj ? MIN_TICK_MAJ_R : MIN_TICK_MIN_R, ang);
-    graphics_draw_line(ctx, p1, p2);
+static void load_settings(void) {
+  if (persist_exists(PERSIST_KEY_BG_WHITE)) {
+    s_bg_white = (persist_read_int(PERSIST_KEY_BG_WHITE) != 0);
   }
-
-  graphics_context_set_text_color(ctx, GColorDarkGray);
-  for (int i = 0; i < 12; i++) {
-    GPoint p = polar_pt(CX, CY, MIN_NUM_R, i * 30 - min_deg);
-    graphics_draw_text(ctx, s_min_labels[i], s_font_24b,
-                       GRect(p.x - 15, p.y - 16, 30, 20),
-                       GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+  if (persist_exists(PERSIST_KEY_BAND_COLOR)) {
+    s_band_argb = (uint8_t)(persist_read_int(PERSIST_KEY_BAND_COLOR) & 0xFF);
   }
+  apply_palette();
 }
 
-static void draw_date_ring(GContext *ctx, int r, GColor accent) {
-  if (r < 2) return;
-
-  GRect rect = GRect(CX - r, CY - r, r * 2, r * 2);
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
-                        r, 0, DEG_TO_TRIGANGLE(360));
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_circle(ctx, GPoint(CX, CY), r);
-
-  if (r < 30) return;
-
-  static const char *s_day_strs[] = {
-    "1","2","3","4","5","6","7","8","9","10",
-    "11","12","13","14","15","16","17","18","19","20",
-    "21","22","23","24","25","26","27","28","29","30","31"
-  };
-
-  int text_r = r * DATE_TEXT_R / DATE_RING_R;
-
-  for (int i = 1; i <= 31; i++) {
-    int    ang = (i - 1) * 360 / 31;
-    GPoint p   = polar_pt(CX, CY, text_r, ang);
-    bool   cur = (i == s_mday);
-    graphics_context_set_text_color(ctx, cur ? accent : GColorDarkGray);
-    graphics_draw_text(ctx, s_day_strs[i - 1], s_font_14b,
-                       GRect(p.x - 7, p.y - 9, 14, 11),
-                       GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-  }
-}
-
-static void draw_battery_ring(GContext *ctx, int bat_pct) {
-  int ring_w = BAT_R_OUT - BAT_R_IN;
-  GRect bg = GRect(CX - BAT_R_OUT, CY - BAT_R_OUT, BAT_R_OUT * 2, BAT_R_OUT * 2);
-
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_radial(ctx, bg, GOvalScaleModeFitCircle, ring_w,
-    DEG_TO_TRIGANGLE(180), DEG_TO_TRIGANGLE(360));
-
-  if (bat_pct > 0) {
-    int fill_w = bat_pct * ring_w / 100;
-    if (fill_w < 1) fill_w = 1;
-    graphics_context_set_fill_color(ctx, bat_color(bat_pct));
-    graphics_fill_radial(ctx, bg, GOvalScaleModeFitCircle, fill_w,
-      DEG_TO_TRIGANGLE(180), DEG_TO_TRIGANGLE(360));
-  }
-
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_circle(ctx, GPoint(CX, CY), BAT_R_OUT);
-  graphics_draw_circle(ctx, GPoint(CX, CY), BAT_R_IN);
-}
-
-static void draw_hour_dial(GContext *ctx, int hour_deg) {
-  GRect rect = GRect(CX - HOUR_R, CY - HOUR_R, HOUR_R * 2, HOUR_R * 2);
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
-                        HOUR_R, 0, DEG_TO_TRIGANGLE(360));
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_stroke_width(ctx, 2);
-  graphics_draw_circle(ctx, GPoint(CX, CY), HOUR_R);
-
-  for (int i = 0; i < 12; i++) {
-    bool  maj = (i % 3 == 0);
-    GPoint p1 = polar_pt(CX, CY, HOUR_TICK_OUT, i * 30);
-    GPoint p2 = polar_pt(CX, CY, maj ? HOUR_TICK_MAJ : HOUR_TICK_MIN, i * 30);
-    graphics_context_set_stroke_color(ctx, maj ? GColorWhite : GColorDarkGray);
-    graphics_context_set_stroke_width(ctx, maj ? 2 : 1);
-    graphics_draw_line(ctx, p1, p2);
-  }
-
-  {
-    static const char *day_names[] = {
-      "SUN","MON","TUE","WED","THU","FRI","SAT"
-    };
-    graphics_context_set_text_color(ctx, GColorWhite);
-    graphics_draw_text(ctx, day_names[s_wday],
-                       s_font_14b,
-                       GRect(CX - 23, CY + 6, 46, 20),
-                       GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-  }
-
-  GPoint tip  = polar_pt(CX, CY,  HOUR_HAND_LEN,  hour_deg);
-  GPoint tail = polar_pt(CX, CY, -HOUR_HAND_TAIL, hour_deg);
-  graphics_context_set_stroke_color(ctx, GColorYellow);
-  graphics_context_set_stroke_width(ctx, 3);
-  graphics_draw_line(ctx, tail, tip);
-
-  graphics_context_set_fill_color(ctx, GColorRed);
-  graphics_fill_circle(ctx, GPoint(CX, CY), 4);
-
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, "pebble", s_font_18b,
-                     GRect(20, 13, 100, 20),
-                     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-}
-
-// ── 虫眼鏡インジケーター ──────────────────────────────────
-#define LENS_R   30
-#define LENS_CX  CX
-#define LENS_CY  (CY - MIN_NUM_R)
-
-static void draw_indicator_bg(GContext *ctx) {
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_circle(ctx, GPoint(LENS_CX, LENS_CY), LENS_R + 3);
-
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_circle(ctx, GPoint(LENS_CX, LENS_CY), LENS_R);
-}
-
-static void draw_indicator_text(GContext *ctx, int current_min) {
-  char buf[4];
-  if (current_min == 0) snprintf(buf, sizeof(buf), "60");
-  else                  snprintf(buf, sizeof(buf), "%d", current_min);
-
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, buf, s_font_BrelaDigits_45,
-    GRect(LENS_CX - LENS_R, LENS_CY - 32, LENS_R * 2, 52),
-    GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-
-  graphics_context_set_stroke_color(ctx, GColorWhite);
-  graphics_context_set_stroke_width(ctx, 2);
-  graphics_draw_arc(ctx,
-    GRect(LENS_CX - LENS_R + 4, LENS_CY - LENS_R + 4,
-          (LENS_R - 3) * 2, (LENS_R - 3) * 2),
-    GOvalScaleModeFitCircle,
-    DEG_TO_TRIGANGLE(160), DEG_TO_TRIGANGLE(280));
-}
-
-static void draw_sec_arc(GContext *ctx, int sec, int bat_pct) {
-  GRect rect = GRect(CX - BAT_R_OUT, CY - BAT_R_OUT,
-                     BAT_R_OUT * 2, BAT_R_OUT * 2);
-  int32_t R0 = DEG_TO_TRIGANGLE(0);
-
-  graphics_context_set_antialiased(ctx, true);
-
-  int filled_deg = sec * 180 / SEC_ARC_GOAL;
-  if (filled_deg > 0) {
-    graphics_context_set_fill_color(ctx, bat_color(bat_pct));
-    graphics_fill_radial(ctx, rect, GOvalScaleModeFitCircle,
-                         4, R0, DEG_TO_TRIGANGLE(filled_deg));
-  }
-}
-
-// ── 万歩計ゲージ ──────────────────────────────────────────
-static void draw_step_ring(GContext *ctx, int steps) {
-  int ring_w = BAT_R_OUT - BAT_R_IN;
-  GRect bg = GRect(CX - BAT_R_OUT, CY - BAT_R_OUT, BAT_R_OUT * 2, BAT_R_OUT * 2);
-
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_radial(ctx, bg, GOvalScaleModeFitCircle, ring_w,
-    0, DEG_TO_TRIGANGLE(360));
-
-  int fill_deg = (steps * 360) / 10000;
-  if (fill_deg > 360) fill_deg = 360;
-
-  if (fill_deg > 0) {
-    GColor step_color;
-    if (steps >= 10000) step_color = GColorGreen;
-    else if (steps >= 7500) step_color = GColorMintGreen;
-    else if (steps >= 5000) step_color = GColorCyan;
-    else if (steps >= 2500) step_color = GColorYellow;
-    else step_color = GColorOrange;
-
-    graphics_context_set_fill_color(ctx, step_color);
-    graphics_fill_radial(ctx, bg, GOvalScaleModeFitCircle, ring_w,
-      0, DEG_TO_TRIGANGLE(fill_deg));
-  }
-
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_circle(ctx, GPoint(CX, CY), BAT_R_OUT);
-  graphics_draw_circle(ctx, GPoint(CX, CY), BAT_R_IN);
-
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, "STEP", s_font_14b,
-                     GRect(CX - 25, 5, 50, 16),
-                     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-
-  char step_str[8];
-  snprintf(step_str, sizeof(step_str), "%d", steps);
-  graphics_context_set_text_color(ctx, GColorCyan);
-  graphics_draw_text(ctx, step_str, s_font_24b,
-                     GRect(CX - 40, CY + 2, 80, 30),
-                     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-}
-
-// ── メイン描画 ──────────────────────────────────────────
-static void canvas_update_proc(Layer *layer, GContext *ctx) {
-  // 背景: 画像があれば全画面表示、なければ黒塗り
-  if (s_bg_ready && s_bg_bitmap) {
-    graphics_draw_bitmap_in_rect(ctx, s_bg_bitmap, GRect(0, 0, BG_W, BG_H));
-  } else {
-    graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_rect(ctx, GRect(0, 0, SCREEN_W, SCREEN_H), 0, GCornerNone);
-  }
-
-  // 現在時刻を直接取得（アニメーションなし）
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-  int current_min  = t->tm_min;
-  int current_sec  = t->tm_sec;
-  int current_hour = t->tm_hour;
-  int quantized_sec = (current_sec / MIN_ROTATE_INTERVAL) * MIN_ROTATE_INTERVAL;
-  int min_deg  = current_min * 6 + quantized_sec * 6 / 60;
-  int hour_deg = (current_hour % 12) * 30 + current_min / 2;
-  int bat_pct  = s_battery_pct;
-
-  GColor accent = bat_color(bat_pct);
-
-  draw_date_ring(ctx, DATE_RING_R, accent);
-
-  if (s_show_steps) {
-    draw_step_ring(ctx, s_step_count);
-  } else {
-    draw_battery_ring(ctx, bat_pct);
-    draw_sec_arc(ctx, s_sec, bat_pct);
-  }
-
-  draw_hour_dial(ctx, hour_deg);
-  draw_minute_ring(ctx, min_deg);
-  draw_indicator_bg(ctx);
-  draw_indicator_text(ctx, s_min);
-}
-
-// ── フレームタイマー ──────────────────────────────────────
-static void frame_timer_proc(void *data) {
-  layer_mark_dirty(s_canvas_layer);
-  s_frame_timer = app_timer_register(FRAME_INTERVAL_MS, frame_timer_proc, NULL);
-}
-
-// ── イベントハンドラ ────────────────────────────────────
-static void tick_handler(struct tm *t, TimeUnits u) {
+// ── イベント ──────────────────────────────────────────────
+static void tick_handler(struct tm *t, TimeUnits units) {
   s_min  = t->tm_min;
-  s_sec  = t->tm_sec;
   s_hour = t->tm_hour;
   s_wday = t->tm_wday;
   s_mday = t->tm_mday;
+  if (!s_animating) layer_mark_dirty(s_canvas_layer);
 }
 
 static void battery_handler(BatteryChargeState state) {
   s_battery_pct = state.charge_percent;
+  if (!s_animating) layer_mark_dirty(s_canvas_layer);
 }
 
-#if defined(PBL_HEALTH)
-static void health_handler(HealthEventType event, void *context) {
-  s_step_count = (int)health_service_sum_today(HealthMetricStepCount);
-  layer_mark_dirty(s_canvas_layer);
-}
-#endif
-
-static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
-  s_show_steps = !s_show_steps;
-  layer_mark_dirty(s_canvas_layer);
-}
-
-static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
-  s_tick_color_idx = (s_tick_color_idx + 1) % TICK_COLOR_COUNT;
-  layer_mark_dirty(s_canvas_layer);
-}
-
-static void click_config_provider(void *context) {
-  window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
-}
-
-// ── Window ──────────────────────────────────────────────
+// ── Window ────────────────────────────────────────────────
 static void window_load(Window *window) {
-  s_font_14b  = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  s_font_18b  = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  s_font_24b  = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  s_font_28b  = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
-  s_font_BrelaDigits_45 = fonts_load_custom_font(
+  s_font_big = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_BrelaDigits_45));
+  s_font_mid = fonts_load_custom_font(
+      resource_get_handle(RESOURCE_ID_BrelaDigits_24));
+  s_font_24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  s_font_14b = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  s_font_09  = fonts_get_system_font(FONT_KEY_GOTHIC_09);
 
-  Layer *root   = window_get_root_layer(window);
-  GRect  bounds = layer_get_bounds(root);
-
-  s_canvas_layer = layer_create(bounds);
+  Layer *root = window_get_root_layer(window);
+  s_canvas_layer = layer_create(layer_get_bounds(root));
   layer_set_update_proc(s_canvas_layer, canvas_update_proc);
   layer_add_child(root, s_canvas_layer);
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
   s_min  = t->tm_min;
-  s_sec  = t->tm_sec;
   s_hour = t->tm_hour;
   s_wday = t->tm_wday;
   s_mday = t->tm_mday;
 
-  BatteryChargeState bat = battery_state_service_peek();
-  s_battery_pct = bat.charge_percent;
+  s_battery_pct = battery_state_service_peek().charge_percent;
 
-  tick_timer_service_subscribe(SECOND_UNIT, tick_handler);
+  load_settings();
+
+  // 更新は1分ごと。秒表示は無いので秒単位で起こす必要が無い
+  tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   battery_state_service_subscribe(battery_handler);
-  accel_tap_service_subscribe(accel_tap_handler);
-  window_set_click_config_provider(s_window, click_config_provider);
 
-#if defined(PBL_HEALTH)
-  s_step_count = (int)health_service_sum_today(HealthMetricStepCount);
-  health_service_events_subscribe(health_handler, NULL);
-#endif
-
-  // AppMessage 設定
   app_message_register_inbox_received(inbox_received_handler);
-  app_message_open(4096, 512);
+  app_message_open(256, 64);
 
-  // 保存済み背景画像を読み込み
-  load_bg_from_persist();
-
-  // フレームタイマー開始
-  s_frame_timer = app_timer_register(FRAME_INTERVAL_MS, frame_timer_proc, NULL);
+  start_animation();
 }
 
 static void window_unload(Window *window) {
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
-  accel_tap_service_unsubscribe();
-#if defined(PBL_HEALTH)
-  health_service_events_unsubscribe();
-#endif
-  if (s_frame_timer) {
-    app_timer_cancel(s_frame_timer);
-    s_frame_timer = NULL;
-  }
-  if (s_bg_bitmap) {
-    gbitmap_destroy(s_bg_bitmap);
-    s_bg_bitmap = NULL;
-  }
   app_message_deregister_callbacks();
-  fonts_unload_custom_font(s_font_BrelaDigits_45);
+  if (s_anim_timer) {
+    app_timer_cancel(s_anim_timer);
+    s_anim_timer = NULL;
+  }
+  fonts_unload_custom_font(s_font_big);
+  fonts_unload_custom_font(s_font_mid);
   layer_destroy(s_canvas_layer);
 }
 
-// ── App Entry ──────────────────────────────────────────
+// ── App Entry ─────────────────────────────────────────────
 static void init(void) {
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);

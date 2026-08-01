@@ -11,13 +11,22 @@
         ],
         "displayName": "Folding watch pic",
         "enableMultiJS": true,
-        "messageKeys": [],
+        "messageKeys": [
+            "BG_WHITE",
+            "BAND_COLOR"
+        ],
         "projectType": "native",
         "resources": {
             "media": [
                 {
                     "file": "fonts/BrelaDigits_45.otf",
                     "name": "BrelaDigits_45",
+                    "targetPlatforms": null,
+                    "type": "font"
+                },
+                {
+                    "file": "fonts/BrelaDigits_45.otf",
+                    "name": "BrelaDigits_24",
                     "targetPlatforms": null,
                     "type": "font"
                 }
