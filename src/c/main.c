@@ -10,12 +10,13 @@
  *   読み取り位置が縦に2つ並ぶだけになり、視線移動がほぼ無くなる。
  *
  * 構成 (中心 CX,CY=(120,78) からの半径。読み取りは6時側=下方向。時が上・分が下の順で並ぶ):
- *   r=61   時リングの数字  → 6時位置 (CX,139)、実際の数字は15px下の y=154
+ *   r=61   時リングの数字  → 6時位置 (CX,139)、実際の数字は10px下の y=149
  *   r=99   分リングの目盛り (60本)
- *   r=113  分リングの数字  → 6時位置 (CX,191)、実際の数字は15px下の y=206
+ *   r=113  分リングの数字  → 6時位置 (CX,191)、実際の数字は10px下の y=201
  *   r=39   バッテリー弧 (幅5px, 左半分) + 12時側から画面右端への水平延長線
  *   中央   BATTERY ラベルと残量の数値
- *   y=176..184  時と分の数字の隙間の色帯 (スマホから色を設定)
+ *   y=168..176  時と分の数字の隙間の色帯 (スマホから色を設定)
+ *   時刻エリア (77,125)-(163,225) は保護矩形。色帯以外は描かない
  *
  * 設定 (スマホの Pebble アプリ):
  *   BG_WHITE    背景 黒(0) / 白(1)
@@ -23,7 +24,7 @@
  *   前景色は背景から自動導出する。白地に白文字のような組合せを作らせないため。
  *
  * 電力:
- *   更新は MINUTE_UNIT の1分ごと。起動時のみ AppTimer を約1.2秒回す。
+ *   更新は MINUTE_UNIT の1分ごと。起動時のみ AppTimer を約1.5秒回す。
  */
 
 #include <pebble.h>
@@ -42,9 +43,6 @@
 #define MIN_NUM_R       113
 
 // ── 時リング (旧・日付リングを置換) ────────────────────────
-// 縦の予算は「分の読取(34) 〜 バッテリー水平線(108)」の 74px で固定。
-// 1.5 * 字形高 <= 74 - 帯高 なので、字形は 43px あたりが上限。
-// 時リングを内外に動かしても総予算は変わらない (下げるとバッテリー線に当たる)。
 #define HOUR_NUM_R       61
 #define HOUR_TICK_OUT    52
 #define HOUR_TICK_IN     45
@@ -58,27 +56,38 @@
 // リング自体はここ (139/191)、大きい数字はさらに DIGIT_OFFSET だけ下にずらして描く。
 #define MIN_READ_CY   (CY + MIN_NUM_R)    // 191
 #define HOUR_READ_CY  (CY + HOUR_NUM_R)   // 139
-#define DIGIT_OFFSET   15                 // 数字だけ下げる量 (下端余白 2px まで)
-#define MIN_DIGIT_CY   (MIN_READ_CY  + DIGIT_OFFSET)   // 206
-#define HOUR_DIGIT_CY  (HOUR_READ_CY + DIGIT_OFFSET)   // 154
+#define DIGIT_OFFSET   10                 // 数字だけ下げる量
+#define MIN_DIGIT_CY   (MIN_READ_CY  + DIGIT_OFFSET)   // 201
+#define HOUR_DIGIT_CY  (HOUR_READ_CY + DIGIT_OFFSET)   // 149
 
-// 読み取り位置に来るリングのラベルは描かない (大きい数字と二重になるため)
-#define GHOST_DX   34
-#define GHOST_DY   26
+// ── 時刻エリア (保護矩形) ─────────────────────────────────
+// 時と分の数字を囲う長方形。この中には色帯以外いっさい描かない。
+// 目盛り・ラベルとも、この矩形に入るものは間引く。
+#define GUARD_DX      43
+#define GUARD_PAD     24
+#define GUARD_X0   (CX - GUARD_DX)              //  77
+#define GUARD_X1   (CX + GUARD_DX)              // 163
+#define GUARD_Y0   (HOUR_DIGIT_CY - GUARD_PAD)  // 125
+#define GUARD_Y1   (MIN_DIGIT_CY  + GUARD_PAD)  // 225
 
-// 上端の "pebble" ロゴと重なるラベルは間引く
-#define PEBBLE_CY    12
-#define PEBBLE_DX    46
+// "pebble" ロゴ: バッテリー水平線 (y = CY - BAT_R_OUT = 39) の真上に置き、
+// あの線がアンダーラインに見えるようにする。線は x=CX..SCREEN_W なのでその中央へ。
+#define PEBBLE_CX   ((CX + SCREEN_W) / 2)   // 160
+#define PEBBLE_CY    28
+#define PEBBLE_DX    40
 #define PEBBLE_DY    14
+// 目盛りを消す矩形だけ 2px 上へ。バッテリー水平線(y=39)を削らないようにするため
+#define PEBBLE_ERASE_DY   2
+#define PEBBLE_ERASE_Y0  (PEBBLE_CY - 10 - PEBBLE_ERASE_DY)   // 16 (下端は 35)
 
 // ── 色帯 ──────────────────────────────────────────────────
-// 時の数字(y=154)の下端と分の数字(y=206)の上端の隙間に収める。
+// 時の数字(y=149)の下端と分の数字(y=201)の上端の隙間に収める。
 #define BAND_X    90
-#define BAND_Y   176
+#define BAND_Y   168
 #define BAND_H     9
 
 // ── アニメーション ────────────────────────────────────────
-#define ANIM_DURATION_MS  1200
+#define ANIM_DURATION_MS  1500
 #define ANIM_INTERVAL_MS    33
 
 // ── 設定の保存キー ────────────────────────────────────────
@@ -146,11 +155,14 @@ static int32_t ease_in_out(int32_t t) {
   return -1000 + (4000 - 2 * t) * t / 1000;
 }
 
-static int32_t ease_out_back(int32_t t) {
-  int32_t tm1   = t - 1000;
-  int32_t tm1_2 = tm1 * tm1 / 1000;
-  int32_t tm1_3 = tm1_2 * tm1 / 1000;
-  return 1000 + 2702 * tm1_3 / 1000 + 1702 * tm1_2 / 1000;
+// 終盤を強く引き延ばす減速。1 - (1-t)^5
+static int32_t ease_out_quint(int32_t t) {
+  int32_t u  = 1000 - t;
+  int32_t u2 = u  * u / 1000;
+  int32_t u3 = u2 * u / 1000;
+  int32_t u4 = u3 * u / 1000;
+  int32_t u5 = u4 * u / 1000;
+  return 1000 - u5;
 }
 
 // 0 から deg へ向かう最短角 (180°を超えるなら逆回転)
@@ -216,16 +228,24 @@ static void draw_text_mid(GContext *ctx, const char *text, GFont font,
 
 // ── 描画 ──────────────────────────────────────────────────
 
-// 読み取り位置に来たか、"pebble" ロゴや色帯と重なるかを判定する。
-// 該当すればラベルは描かない (大きい数字/ロゴ/帯の上に暗い文字が埋もれるため)。
-static bool label_should_skip(GPoint p, int read_cy) {
-  if (iabs(p.x - CX) < GHOST_DX && iabs(p.y - read_cy) < GHOST_DY) {
-    return true;
-  }
-  if (p.x > BAND_X - 14 && p.y > BAND_Y - 15 && p.y < BAND_Y + BAND_H + 15) {
-    return true;
-  }
-  if (iabs(p.y - PEBBLE_CY) < PEBBLE_DY && iabs(p.x - CX) < PEBBLE_DX) {
+// 時刻エリア (保護矩形) の中か。ここには色帯以外なにも描かない
+static bool in_guard(GPoint p) {
+  return p.x >= GUARD_X0 && p.x <= GUARD_X1 &&
+         p.y >= GUARD_Y0 && p.y <= GUARD_Y1;
+}
+
+// 目盛り1本を描く。両端のどちらかが保護矩形に入るなら描かない
+static void draw_tick(GContext *ctx, int r_out, int r_in, int ang) {
+  GPoint a = polar_pt(CX, CY, r_out, ang);
+  GPoint b = polar_pt(CX, CY, r_in,  ang);
+  if (in_guard(a) || in_guard(b)) return;
+  graphics_draw_line(ctx, a, b);
+}
+
+// ラベルを描かない条件: 保護矩形の中、または "pebble" ロゴと重なる位置
+static bool label_should_skip(GPoint p) {
+  if (in_guard(p)) return true;
+  if (iabs(p.y - PEBBLE_CY) < PEBBLE_DY && iabs(p.x - PEBBLE_CX) < PEBBLE_DX) {
     return true;
   }
   return false;
@@ -237,14 +257,11 @@ static void draw_hour_ring(GContext *ctx, int hour_deg) {
   graphics_context_set_stroke_color(ctx, s_label);
   graphics_context_set_stroke_width(ctx, 2);
   for (int i = 0; i < 12; i++) {
-    int ang = i * 30 - hour_deg + 180;
-    graphics_draw_line(ctx,
-                       polar_pt(CX, CY, HOUR_TICK_OUT, ang),
-                       polar_pt(CX, CY, HOUR_TICK_IN,  ang));
+    draw_tick(ctx, HOUR_TICK_OUT, HOUR_TICK_IN, i * 30 - hour_deg + 180);
   }
   for (int i = 0; i < 12; i++) {
     GPoint p = polar_pt(CX, CY, HOUR_NUM_R, i * 30 - hour_deg + 180);
-    if (label_should_skip(p, HOUR_DIGIT_CY)) continue;
+    if (label_should_skip(p)) continue;
     draw_text_mid(ctx, s_hour_labels[i], s_font_14b, s_label, p.x, p.y, 30, DY_SYS);
   }
 }
@@ -254,15 +271,13 @@ static void draw_minute_ring(GContext *ctx, int min_deg) {
   graphics_context_set_stroke_color(ctx, s_ink);
   graphics_context_set_stroke_width(ctx, 2);
   for (int i = 0; i < 60; i++) {
-    int  ang = i * 6 - min_deg + 180;
     bool maj = (i % 5 == 0);
-    graphics_draw_line(ctx,
-        polar_pt(CX, CY, MIN_RING_R, ang),
-        polar_pt(CX, CY, maj ? MIN_TICK_MAJ_R : MIN_TICK_MIN_R, ang));
+    draw_tick(ctx, MIN_RING_R, maj ? MIN_TICK_MAJ_R : MIN_TICK_MIN_R,
+              i * 6 - min_deg + 180);
   }
   for (int i = 0; i < 12; i++) {
     GPoint p = polar_pt(CX, CY, MIN_NUM_R, i * 30 - min_deg + 180);
-    if (label_should_skip(p, MIN_DIGIT_CY)) continue;
+    if (label_should_skip(p)) continue;
     draw_text_mid(ctx, s_min_labels[i], s_font_24b, s_label, p.x, p.y, 34, DY_SYS);
   }
 }
@@ -306,16 +321,17 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     int32_t t = (int32_t)s_anim_elapsed * 1000 / ANIM_DURATION_MS;
     if (t > 1000) t = 1000;
 
-    // リングは12時位置 (60 と 12) から最短回りで現在値へ
-    min_deg  = (int)(ease_in_out(seg(t, 0, 700)) * shortest(s_min * 6) / 1000);
-    hour_deg = (int)(ease_out_back(seg(t, 0, 580))
+    // リングは12時位置 (60 と 12) から最短回りで現在値へ。
+    // ease_out_quint で最後まで到達させ、終盤を強く引き延ばして焦らす
+    min_deg  = (int)(ease_out_quint(seg(t, 0, 1000)) * shortest(s_min * 6) / 1000);
+    hour_deg = (int)(ease_out_quint(seg(t, 0, 900))
                      * shortest((s_hour % 12) * 30) / 1000);
 
     // 弧が下から上へ → 続けて水平線が右端へ
-    sweep1000 = ease_in_out(seg(t, 100, 600));
-    line1000  = ease_in_out(seg(t, 580, 880));
-    shown_pct = (t > 200)
-        ? (int)(s_battery_pct * ease_in_out(seg(t, 200, 800)) / 1000)
+    sweep1000 = ease_in_out(seg(t, 80, 550));
+    line1000  = ease_in_out(seg(t, 530, 800));
+    shown_pct = (t > 180)
+        ? (int)(s_battery_pct * ease_in_out(seg(t, 180, 780)) / 1000)
         : -1;
 
     // 数字はリングの現在位置に追従させる (回って数字が変わるのが見どころ)
@@ -366,10 +382,12 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
                  28, SCREEN_H - 12, 44, DY_SYS);
   }
 
-  // pebble: 時分と同じ縦ライン上、画面上端。リングのラベルを背景色で打ち抜く
+  // pebble: バッテリー水平線 (y = CY - BAT_R_OUT) の真上。
+  // あの線がそのままアンダーラインに見える。リングのラベルは背景色で打ち抜く
   graphics_context_set_fill_color(ctx, s_bg);
-  graphics_fill_rect(ctx, GRect(CX - 32, PEBBLE_CY - 10, 64, 20), 0, GCornerNone);
-  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, CX, PEBBLE_CY, 64, DY_SYS);
+  graphics_fill_rect(ctx, GRect(PEBBLE_CX - 34, PEBBLE_ERASE_Y0, 68, 20),
+                     0, GCornerNone);
+  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, PEBBLE_CX, PEBBLE_CY, 68, DY_SYS);
 }
 
 // ── アニメーション ────────────────────────────────────────
