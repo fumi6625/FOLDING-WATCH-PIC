@@ -19,14 +19,14 @@
         "resources": {
             "media": [
                 {
-                    "file": "fonts/BrelaDigits_45.otf",
-                    "name": "BrelaDigits_50",
+                    "file": "fonts/BrelaBig.otf",
+                    "name": "BrelaBig_56",
                     "targetPlatforms": null,
                     "type": "font"
                 },
                 {
-                    "file": "fonts/BrelaDigits_45.otf",
-                    "name": "BrelaDigits_24",
+                    "file": "fonts/BrelaSmall.otf",
+                    "name": "BrelaSmall_26",
                     "targetPlatforms": null,
                     "type": "font"
                 }

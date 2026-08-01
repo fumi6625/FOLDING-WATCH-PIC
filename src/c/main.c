@@ -15,7 +15,7 @@
  *   r=113  分リングの数字  → 6時位置 (CX,191)、実際の数字は10px下の y=201
  *   r=39   バッテリー弧 (幅5px, 左半分) + 12時側から画面右端への水平延長線
  *   中央   BATTERY ラベルと残量の数値
- *   y=168..176  時と分の数字の隙間の色帯 (スマホから色を設定)
+ *   y=170..177  時と分の数字の隙間の色帯 (スマホから色を設定)
  *   時刻エリア (77,125)-(163,225) は保護矩形。色帯以外は描かない
  *
  * 設定 (スマホの Pebble アプリ):
@@ -81,10 +81,11 @@
 #define PEBBLE_ERASE_Y0  (PEBBLE_CY - 10 - PEBBLE_ERASE_DY)   // 16 (下端は 35)
 
 // ── 色帯 ──────────────────────────────────────────────────
-// 時の数字(y=149)の下端と分の数字(y=201)の上端の隙間に収める。
+// 時の数字(y=149)と分の数字(y=201)の間隔は52pxで固定。
+// ここに「字形高 + 帯高」が入る必要があるので、帯は薄くして中央寄りに置く。
 #define BAND_X    90
-#define BAND_Y   168
-#define BAND_H     9
+#define BAND_Y   170
+#define BAND_H     8
 
 // ── アニメーション ────────────────────────────────────────
 #define ANIM_DURATION_MS  1500
@@ -100,8 +101,8 @@
 static Window *s_window;
 static Layer  *s_canvas_layer;
 
-static GFont s_font_big;      // BrelaDigits_50 — 時・分の数字
-static GFont s_font_mid;      // BrelaDigits_24 — バッテリーの数値
+static GFont s_font_big;      // BrelaBig_56 — 時・分の数字
+static GFont s_font_mid;      // BrelaSmall_26 — バッテリーの数値
 static GFont s_font_24b;      // 分リングのラベル / 日付
 static GFont s_font_14b;      // 時リングのラベル / pebble
 static GFont s_font_09;       // BATTERY / 曜日
@@ -222,8 +223,8 @@ static void draw_text_mid(GContext *ctx, const char *text, GFont font,
 }
 
 // フォント高の約13%。実機で字形が上下にずれる場合はここを増減させる
-#define DY_BIG   (-7)    // BrelaDigits_50
-#define DY_MID   (-3)    // BrelaDigits_24
+#define DY_BIG   (-7)    // BrelaBig_56
+#define DY_MID   (-3)    // BrelaSmall_26
 #define DY_SYS     0     // Gothic 系は content_size の半分でほぼ合う
 
 // ── 描画 ──────────────────────────────────────────────────
@@ -465,9 +466,9 @@ static void battery_handler(BatteryChargeState state) {
 // ── Window ────────────────────────────────────────────────
 static void window_load(Window *window) {
   s_font_big = fonts_load_custom_font(
-      resource_get_handle(RESOURCE_ID_BrelaDigits_50));
+      resource_get_handle(RESOURCE_ID_BrelaBig_56));
   s_font_mid = fonts_load_custom_font(
-      resource_get_handle(RESOURCE_ID_BrelaDigits_24));
+      resource_get_handle(RESOURCE_ID_BrelaSmall_26));
   s_font_24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   s_font_14b = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_font_09  = fonts_get_system_font(FONT_KEY_GOTHIC_09);
