@@ -84,7 +84,7 @@
 // 時の数字(y=149)と分の数字(y=201)の間隔は52pxで固定。
 // ここに「字形高 + 帯高」が入る必要があるので、帯は薄くして中央寄りに置く。
 #define BAND_X    90
-#define BAND_Y   170
+#define BAND_Y   171
 #define BAND_H     8
 
 // ── アニメーション ────────────────────────────────────────
@@ -101,7 +101,7 @@
 static Window *s_window;
 static Layer  *s_canvas_layer;
 
-static GFont s_font_big;      // BrelaBig_56 — 時・分の数字
+static GFont s_font_big;      // BrelaBig_52 (declared size, 実測比率0.8で 字形高~42px 見込み) — 時・分の数字
 static GFont s_font_mid;      // BrelaSmall_26 — バッテリーの数値
 static GFont s_font_24b;      // 分リングのラベル / 日付
 static GFont s_font_14b;      // 時リングのラベル / pebble
@@ -223,7 +223,7 @@ static void draw_text_mid(GContext *ctx, const char *text, GFont font,
 }
 
 // フォント高の約13%。実機で字形が上下にずれる場合はここを増減させる
-#define DY_BIG   (-7)    // BrelaBig_56
+#define DY_BIG   (-7)    // BrelaBig_52 (declared size, 実測比率0.8で 字形高~42px 見込み)
 #define DY_MID   (-3)    // BrelaSmall_26
 #define DY_SYS     0     // Gothic 系は content_size の半分でほぼ合う
 
@@ -466,7 +466,7 @@ static void battery_handler(BatteryChargeState state) {
 // ── Window ────────────────────────────────────────────────
 static void window_load(Window *window) {
   s_font_big = fonts_load_custom_font(
-      resource_get_handle(RESOURCE_ID_BrelaBig_56));
+      resource_get_handle(RESOURCE_ID_BrelaBig_52));
   s_font_mid = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_BrelaSmall_26));
   s_font_24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
