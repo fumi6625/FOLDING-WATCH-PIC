@@ -15,10 +15,10 @@
  *   r=113  分リングの数字  → 6時位置 (CX,191) がそのまま数字の中心
  *   r=39   バッテリー弧 (幅5px, 左半分) + 12時側から画面右端への水平延長線
  *   中央   BATTERY ラベルと残量の数値
- *   y=163..167  時と分の数字の隙間の色帯 (スマホから色を設定)。
+ *   y=169..173  時と分の数字の隙間の色帯 (スマホから色を設定)。
  *   ★注意: declared=64の字形高が推定51px程度あり、gap=52pxとの余白は約1pxしか無い。
  *   帯5pxを戻すと数字と重なる可能性が高い (実機未確認)。
- *   時刻エリア (77,125)-(163,225) は保護矩形。色帯以外は描かない
+ *   時刻エリア (77,125)-(163,216) は保護矩形。色帯以外は描かない
  *
  * 設定 (スマホの Pebble アプリ):
  *   BG_WHITE    背景 黒(0) / 白(1)
@@ -59,18 +59,18 @@
 #define MIN_READ_CY   (CY + MIN_NUM_R)    // 191
 #define HOUR_READ_CY  (CY + HOUR_NUM_R)   // 139
 #define DIGIT_OFFSET    0                 // 数字だけ下げる量 (10→0: 数字を10px上へ移動)
-#define MIN_DIGIT_CY   (MIN_READ_CY  + DIGIT_OFFSET)   // 201
-#define HOUR_DIGIT_CY  (HOUR_READ_CY + DIGIT_OFFSET)   // 149
+#define MIN_DIGIT_CY   (MIN_READ_CY  + DIGIT_OFFSET)   // 191 (DIGIT_OFFSET=0のため MIN_READ_CYと同じ)
+#define HOUR_DIGIT_CY  (HOUR_READ_CY + DIGIT_OFFSET)   // 139 (DIGIT_OFFSET=0のため HOUR_READ_CYと同じ)
 
 // ── 時刻エリア (保護矩形) ─────────────────────────────────
 // 時と分の数字を囲う長方形。この中には色帯以外いっさい描かない。
 // 目盛り・ラベルとも、この矩形に入るものは間引く。
 #define GUARD_DX      43
-#define GUARD_PAD     25
 #define GUARD_X0   (CX - GUARD_DX)              //  77
 #define GUARD_X1   (CX + GUARD_DX)              // 163
-#define GUARD_Y0   (HOUR_DIGIT_CY - GUARD_PAD)  // 125
-#define GUARD_Y1   (MIN_DIGIT_CY  + GUARD_PAD)  // 225
+// Y方向は直接指定 (時・分の数字位置とは独立して固定)
+#define GUARD_Y0      125
+#define GUARD_Y1      216
 
 // "pebble" ロゴ: バッテリー水平線 (y = CY - BAT_R_OUT = 39) の真上に置き、
 // あの線がアンダーラインに見えるようにする。線は x=CX..SCREEN_W なのでその中央へ。
@@ -91,10 +91,10 @@
 #define BATTERY_LABEL_CY  (CY - 9)
 
 // ── 色帯 ──────────────────────────────────────────────────
-// 時の数字(y=149)と分の数字(y=201)の間隔は52pxで固定。
+// 時の数字(y=139)と分の数字(y=191)の間隔は52pxで固定。
 // ここに「字形高 + 帯高」が入る必要があるので、帯は薄くして中央寄りに置く。
 #define BAND_X    90
-#define BAND_Y   163
+#define BAND_Y   169
 #define BAND_H     5
 
 // ── アニメーション ────────────────────────────────────────
