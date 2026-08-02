@@ -53,6 +53,13 @@
                     "name": "IMAGE_BATTERY_LIGHT",
                     "targetPlatforms": null,
                     "type": "bitmap"
+                },
+                {
+                    "file": "images/menu_icon.png",
+                    "name": "MENU_ICON",
+                    "targetPlatforms": null,
+                    "type": "bitmap",
+                    "menuIcon": true
                 }
             ]
         },
