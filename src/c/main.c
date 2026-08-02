@@ -111,9 +111,9 @@ static Layer  *s_canvas_layer;
 
 static GFont s_font_big;      // BrelaBig_56 (declared size, 実測比率0.8で 字形高~45px 見込み) — 時・分の数字
 static GFont s_font_mid;      // BrelaSmall_26 — バッテリーの数値
-static GFont s_font_24b;      // 分リングのラベル / 日付
-static GFont s_font_14b;      // 時リングのラベル
-static GFont s_font_09;       // 曜日
+static GFont s_font_28b;      // 分リングのラベル / 日付 (GOTHIC_28_BOLD)
+static GFont s_font_18b;      // 時リングのラベル (GOTHIC_18_BOLD)
+static GFont s_font_14;       // 曜日 (GOTHIC_14)
 
 // pebble ロゴ / BATTERY ラベルは画像。背景の黒/白それぞれに1枚ずつ ([0]=黒背景用, [1]=白背景用)
 static GBitmap *s_bmp_pebble[2];
@@ -275,7 +275,7 @@ static void draw_hour_ring(GContext *ctx, int hour_deg) {
   for (int i = 0; i < 12; i++) {
     GPoint p = polar_pt(CX, CY, HOUR_NUM_R, i * 30 - hour_deg + 180);
     if (label_should_skip(p)) continue;
-    draw_text_mid(ctx, s_hour_labels[i], s_font_14b, s_label, p.x, p.y, 30, DY_SYS);
+    draw_text_mid(ctx, s_hour_labels[i], s_font_18b, s_label, p.x, p.y, 34, DY_SYS);
   }
 }
 
@@ -291,7 +291,7 @@ static void draw_minute_ring(GContext *ctx, int min_deg) {
   for (int i = 0; i < 12; i++) {
     GPoint p = polar_pt(CX, CY, MIN_NUM_R, i * 30 - min_deg + 180);
     if (label_should_skip(p)) continue;
-    draw_text_mid(ctx, s_min_labels[i], s_font_24b, s_label, p.x, p.y, 34, DY_SYS);
+    draw_text_mid(ctx, s_min_labels[i], s_font_28b, s_label, p.x, p.y, 40, DY_SYS);
   }
 }
 
@@ -400,8 +400,8 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   {
     char dbuf[8];
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
-    draw_text_mid(ctx, dbuf, s_font_24b, s_sub, 28, SCREEN_H - 30, 44, DY_SYS);
-    draw_text_mid(ctx, s_day_names[s_wday], s_font_09, s_label,
+    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 28, SCREEN_H - 30, 48, DY_SYS);
+    draw_text_mid(ctx, s_day_names[s_wday], s_font_14, s_label,
                  28, SCREEN_H - 12, 44, DY_SYS);
   }
 
@@ -491,9 +491,9 @@ static void window_load(Window *window) {
       resource_get_handle(RESOURCE_ID_BrelaBig_56));
   s_font_mid = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_BrelaSmall_26));
-  s_font_24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  s_font_14b = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  s_font_09  = fonts_get_system_font(FONT_KEY_GOTHIC_09);
+  s_font_28b = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  s_font_18b = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  s_font_14  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
 
   // pebble ロゴ / BATTERY ラベルは画像 (黒背景用・白背景用の2枚ずつ)
   s_bmp_pebble[0]  = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_PEBBLE_DARK);
