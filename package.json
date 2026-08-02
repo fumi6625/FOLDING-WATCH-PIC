@@ -20,7 +20,7 @@
             "media": [
                 {
                     "file": "fonts/BrelaBig.otf",
-                    "name": "BrelaBig_52",
+                    "name": "BrelaBig_56",
                     "targetPlatforms": null,
                     "type": "font"
                 },
@@ -29,6 +29,30 @@
                     "name": "BrelaSmall_26",
                     "targetPlatforms": null,
                     "type": "font"
+                },
+                {
+                    "file": "images/pebble_dark.png",
+                    "name": "IMAGE_PEBBLE_DARK",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/pebble_light.png",
+                    "name": "IMAGE_PEBBLE_LIGHT",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/battery_dark.png",
+                    "name": "IMAGE_BATTERY_DARK",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/battery_light.png",
+                    "name": "IMAGE_BATTERY_LIGHT",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
                 }
             ]
         },

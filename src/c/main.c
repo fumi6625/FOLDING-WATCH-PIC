@@ -64,7 +64,7 @@
 // 時と分の数字を囲う長方形。この中には色帯以外いっさい描かない。
 // 目盛り・ラベルとも、この矩形に入るものは間引く。
 #define GUARD_DX      43
-#define GUARD_PAD     24
+#define GUARD_PAD     25
 #define GUARD_X0   (CX - GUARD_DX)              //  77
 #define GUARD_X1   (CX + GUARD_DX)              // 163
 #define GUARD_Y0   (HOUR_DIGIT_CY - GUARD_PAD)  // 125
@@ -74,18 +74,26 @@
 // あの線がアンダーラインに見えるようにする。線は x=CX..SCREEN_W なのでその中央へ。
 #define PEBBLE_CX   ((CX + SCREEN_W) / 2)   // 160
 #define PEBBLE_CY    28
-#define PEBBLE_DX    40
-#define PEBBLE_DY    14
+// pebble ロゴ画像は実測 51x17px
+#define PEBBLE_IMG_W 51
+#define PEBBLE_IMG_H 17
+#define PEBBLE_DX    (PEBBLE_IMG_W / 2 + 4)
+#define PEBBLE_DY    (PEBBLE_IMG_H / 2 + 4)
 // 目盛りを消す矩形だけ 2px 上へ。バッテリー水平線(y=39)を削らないようにするため
 #define PEBBLE_ERASE_DY   2
 #define PEBBLE_ERASE_Y0  (PEBBLE_CY - 10 - PEBBLE_ERASE_DY)   // 16 (下端は 35)
+
+// BATTERY ラベル画像は実測 57x12px
+#define BATTERY_IMG_W 57
+#define BATTERY_IMG_H 12
+#define BATTERY_LABEL_CY  (CY - 9)
 
 // ── 色帯 ──────────────────────────────────────────────────
 // 時の数字(y=149)と分の数字(y=201)の間隔は52pxで固定。
 // ここに「字形高 + 帯高」が入る必要があるので、帯は薄くして中央寄りに置く。
 #define BAND_X    90
-#define BAND_Y   171
-#define BAND_H     8
+#define BAND_Y   173
+#define BAND_H     5
 
 // ── アニメーション ────────────────────────────────────────
 #define ANIM_DURATION_MS  1500
@@ -101,11 +109,15 @@
 static Window *s_window;
 static Layer  *s_canvas_layer;
 
-static GFont s_font_big;      // BrelaBig_52 (declared size, 実測比率0.8で 字形高~42px 見込み) — 時・分の数字
+static GFont s_font_big;      // BrelaBig_56 (declared size, 実測比率0.8で 字形高~45px 見込み) — 時・分の数字
 static GFont s_font_mid;      // BrelaSmall_26 — バッテリーの数値
 static GFont s_font_24b;      // 分リングのラベル / 日付
-static GFont s_font_14b;      // 時リングのラベル / pebble
-static GFont s_font_09;       // BATTERY / 曜日
+static GFont s_font_14b;      // 時リングのラベル
+static GFont s_font_09;       // 曜日
+
+// pebble ロゴ / BATTERY ラベルは画像。背景の黒/白それぞれに1枚ずつ ([0]=黒背景用, [1]=白背景用)
+static GBitmap *s_bmp_pebble[2];
+static GBitmap *s_bmp_battery[2];
 
 static int s_hour, s_min, s_wday, s_mday;
 static int s_battery_pct = 100;
@@ -223,7 +235,7 @@ static void draw_text_mid(GContext *ctx, const char *text, GFont font,
 }
 
 // フォント高の約13%。実機で字形が上下にずれる場合はここを増減させる
-#define DY_BIG   (-7)    // BrelaBig_52 (declared size, 実測比率0.8で 字形高~42px 見込み)
+#define DY_BIG   (-7)    // BrelaBig_56 (declared size, 実測比率0.8で 字形高~45px 見込み)
 #define DY_MID   (-3)    // BrelaSmall_26
 #define DY_SYS     0     // Gothic 系は content_size の半分でほぼ合う
 
@@ -283,6 +295,16 @@ static void draw_minute_ring(GContext *ctx, int min_deg) {
   }
 }
 
+// 画像を (cx, cy) 中心に描く。[0]=黒背景用、[1]=白背景用を s_bg_white で選ぶ
+static void draw_bitmap_mid(GContext *ctx, GBitmap *bmp[2], int cx, int cy) {
+  GBitmap *b = bmp[s_bg_white ? 1 : 0];
+  GRect bounds = gbitmap_get_bounds(b);
+  GRect dest = GRect(cx - bounds.size.w / 2, cy - bounds.size.h / 2,
+                     bounds.size.w, bounds.size.h);
+  graphics_context_set_compositing_mode(ctx, GCompOpSet);
+  graphics_draw_bitmap_in_rect(ctx, b, dest);
+}
+
 // バッテリー: 6時位置(Pebble角180°)を起点に左側を通って12時位置(360°)まで伸びる弧。
 // そのあと line1000 に応じて12時側の端から画面右端まで水平に延長する。
 static void draw_battery(GContext *ctx, int pct,
@@ -308,7 +330,7 @@ static void draw_battery(GContext *ctx, int pct,
   if (shown_pct >= 0) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", shown_pct);
-    draw_text_mid(ctx, "BATTERY", s_font_09, s_sub, CX, CY - 9, 70, DY_SYS);
+    draw_bitmap_mid(ctx, s_bmp_battery, CX, BATTERY_LABEL_CY);
     draw_text_mid(ctx, buf, s_font_mid, bc, CX, CY + 13, 60, DY_MID);
   }
 }
@@ -388,7 +410,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, s_bg);
   graphics_fill_rect(ctx, GRect(PEBBLE_CX - 34, PEBBLE_ERASE_Y0, 68, 20),
                      0, GCornerNone);
-  draw_text_mid(ctx, "pebble", s_font_14b, s_ink, PEBBLE_CX, PEBBLE_CY, 68, DY_SYS);
+  draw_bitmap_mid(ctx, s_bmp_pebble, PEBBLE_CX, PEBBLE_CY);
 }
 
 // ── アニメーション ────────────────────────────────────────
@@ -466,12 +488,18 @@ static void battery_handler(BatteryChargeState state) {
 // ── Window ────────────────────────────────────────────────
 static void window_load(Window *window) {
   s_font_big = fonts_load_custom_font(
-      resource_get_handle(RESOURCE_ID_BrelaBig_52));
+      resource_get_handle(RESOURCE_ID_BrelaBig_56));
   s_font_mid = fonts_load_custom_font(
       resource_get_handle(RESOURCE_ID_BrelaSmall_26));
   s_font_24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   s_font_14b = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_font_09  = fonts_get_system_font(FONT_KEY_GOTHIC_09);
+
+  // pebble ロゴ / BATTERY ラベルは画像 (黒背景用・白背景用の2枚ずつ)
+  s_bmp_pebble[0]  = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_PEBBLE_DARK);
+  s_bmp_pebble[1]  = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_PEBBLE_LIGHT);
+  s_bmp_battery[0] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BATTERY_DARK);
+  s_bmp_battery[1] = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BATTERY_LIGHT);
 
   Layer *root = window_get_root_layer(window);
   s_canvas_layer = layer_create(layer_get_bounds(root));
@@ -509,6 +537,10 @@ static void window_unload(Window *window) {
   }
   fonts_unload_custom_font(s_font_big);
   fonts_unload_custom_font(s_font_mid);
+  gbitmap_destroy(s_bmp_pebble[0]);
+  gbitmap_destroy(s_bmp_pebble[1]);
+  gbitmap_destroy(s_bmp_battery[0]);
+  gbitmap_destroy(s_bmp_battery[1]);
   layer_destroy(s_canvas_layer);
 }
 
