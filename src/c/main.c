@@ -427,7 +427,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     band_color.argb = s_band_argb;
     char dbuf[8];
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
-    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 28, SCREEN_H - 58, 48, DY_SYS);
+    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 28, SCREEN_H - 40, 48, DY_SYS);
     draw_text_mid(ctx, s_day_names[s_wday], s_font_28b, band_color,
                  28, SCREEN_H - 18, 48, DY_SYS);
   }
