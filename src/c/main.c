@@ -429,7 +429,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
     draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 20, SCREEN_H - 18, 36, DY_SYS);
     draw_text_mid(ctx, s_day_names[s_wday], s_font_28b, band_color,
-                 74, SCREEN_H - 18, 64, DY_SYS);
+                 54, SCREEN_H - 18, 64, DY_SYS);
   }
 
   // pebble: バッテリー水平線 (y = CY - BAT_R_OUT) の真上。
