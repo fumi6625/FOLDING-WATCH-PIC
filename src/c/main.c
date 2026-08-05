@@ -389,10 +389,13 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   draw_hour_ring(ctx, hour_deg);
   draw_minute_ring(ctx, min_deg);
 
-  // 時・分の数字 (最上層)
+  // 時・分の数字 (最上層)。
+  // 分は 0 のとき素直に "00" と表示する (分リングのラベルは慣習で "60" を
+  // 使うが、実際の時刻読み取り数字にその慣習を持ち込むと「4時60分」の
+  // ように誤読される。時は12時間表記の慣習どおり 0→12 のままでよい)
   {
     char mbuf[8], hbuf[8];
-    snprintf(mbuf, sizeof(mbuf), "%02d", disp_min == 0 ? 60 : disp_min);
+    snprintf(mbuf, sizeof(mbuf), "%02d", disp_min);
     snprintf(hbuf, sizeof(hbuf), "%d",  disp_hour == 0 ? 12 : disp_hour);
     draw_text_mid(ctx, mbuf, s_font_big, s_ink, CX, MIN_DIGIT_CY,  100, DY_BIG);
     draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_DIGIT_CY, 100, DY_BIG);
