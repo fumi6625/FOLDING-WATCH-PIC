@@ -341,6 +341,7 @@ static void draw_battery(GContext *ctx, int pct,
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
   int min_deg, hour_deg, disp_min, disp_hour, shown_pct;
   int32_t sweep1000, line1000;
+  int band_x0, band_w;
 
   if (s_animating) {
     int32_t t = (int32_t)s_anim_elapsed * 1000 / ANIM_DURATION_MS;
@@ -362,6 +363,22 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     // 数字はリングの現在位置に追従させる (回って数字が変わるのが見どころ)
     disp_min  = ((min_deg  / 6)  % 60 + 60) % 60;
     disp_hour = ((hour_deg / 30) % 12 + 12) % 12;
+
+    // 色帯: 電車が通過して駅に停まるイメージ。
+    // 右端は画面右端(SCREEN_W)で固定。
+    //   フェーズ1 (0〜260): 右端へ向けて右辺が伸び、左辺は0のまま
+    //                      → 画面いっぱいの一本の帯になる (電車が通過)
+    //   フェーズ2 (260〜700): 左辺だけが0→BAND_Xへ、減速しながら移動
+    //                      → 最後尾が定位置で停車 (デフォルト表示)
+    {
+      int32_t grow   = ease_in_out(seg(t, 0, 260));
+      int32_t settle = ease_out_quint(seg(t, 260, 700));
+      int right_edge = SCREEN_W * grow / 1000;
+      int left_edge  = (t <= 260) ? 0 : BAND_X * settle / 1000;
+      band_x0 = left_edge;
+      band_w  = right_edge - left_edge;
+      if (band_w < 0) band_w = 0;
+    }
   } else {
     min_deg   = s_min * 6;
     hour_deg  = (s_hour % 12) * 30;
@@ -370,6 +387,8 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     shown_pct = s_battery_pct;
     disp_min  = s_min;
     disp_hour = s_hour % 12;
+    band_x0   = BAND_X;
+    band_w    = SCREEN_W - BAND_X;
   }
 
   // 背景
@@ -377,11 +396,11 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, GRect(0, 0, SCREEN_W, SCREEN_H), 0, GCornerNone);
 
   // 時と分の隙間の色帯
-  {
+  if (band_w > 0) {
     GColor band;
     band.argb = s_band_argb;
     graphics_context_set_fill_color(ctx, band);
-    graphics_fill_rect(ctx, GRect(BAND_X, BAND_Y, SCREEN_W - BAND_X, BAND_H),
+    graphics_fill_rect(ctx, GRect(band_x0, BAND_Y, band_w, BAND_H),
                        0, GCornerNone);
   }
 
@@ -528,7 +547,11 @@ static void window_load(Window *window) {
 
   app_message_register_inbox_received(inbox_received_handler);
   app_message_open(256, 64);
+}
 
+// .appear は初回表示時と、通知など他のウィンドウが閉じてこの画面に
+// 戻ってきた時の両方で呼ばれる。どちらでも起動アニメーションを再生する
+static void window_appear(Window *window) {
   start_animation();
 }
 
@@ -555,6 +578,7 @@ static void init(void) {
   window_set_background_color(s_window, GColorBlack);
   window_set_window_handlers(s_window, (WindowHandlers){
     .load   = window_load,
+    .appear = window_appear,
     .unload = window_unload,
   });
   window_stack_push(s_window, true);
