@@ -115,7 +115,6 @@ static GFont s_font_big;      // BrelaBig_64 (declared size) — 時・分の数
 static GFont s_font_mid;      // BrelaSmall_26 — バッテリーの数値
 static GFont s_font_28b;      // 分リングのラベル / 日付 (GOTHIC_28_BOLD)
 static GFont s_font_18b;      // 時リングのラベル (GOTHIC_18_BOLD)
-static GFont s_font_14;       // 曜日 (GOTHIC_14)
 
 // pebble ロゴ / BATTERY ラベルは画像。背景の黒/白それぞれに1枚ずつ ([0]=黒背景用, [1]=白背景用)
 static GBitmap *s_bmp_pebble[2];
@@ -420,13 +419,17 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     draw_text_mid(ctx, hbuf, s_font_big, s_ink, CX, HOUR_DIGIT_CY, 100, DY_BIG);
   }
 
-  // 日付・曜日 (左下、分リング r=113 の外側。分の数字が下に来たため)
+  // 日付・曜日 (左下、分リング r=113 の外側。分の数字が下に来たため)。
+  // 曜日は色帯と同じ色・日付と同じ大きさ(GOTHIC_28_BOLD)にしたため、
+  // 曜日の占める高さが増えた分、日付を上へ移動して衝突を避ける
   {
+    GColor band_color;
+    band_color.argb = s_band_argb;
     char dbuf[8];
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
-    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 28, SCREEN_H - 30, 48, DY_SYS);
-    draw_text_mid(ctx, s_day_names[s_wday], s_font_14, s_label,
-                 28, SCREEN_H - 12, 44, DY_SYS);
+    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 28, SCREEN_H - 58, 48, DY_SYS);
+    draw_text_mid(ctx, s_day_names[s_wday], s_font_28b, band_color,
+                 28, SCREEN_H - 18, 48, DY_SYS);
   }
 
   // pebble: バッテリー水平線 (y = CY - BAT_R_OUT) の真上。
@@ -517,7 +520,6 @@ static void window_load(Window *window) {
       resource_get_handle(RESOURCE_ID_BrelaSmall_26));
   s_font_28b = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   s_font_18b = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  s_font_14  = fonts_get_system_font(FONT_KEY_GOTHIC_14);
 
   // pebble ロゴ / BATTERY ラベルは画像 (黒背景用・白背景用の2枚ずつ)
   s_bmp_pebble[0]  = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_PEBBLE_DARK);
