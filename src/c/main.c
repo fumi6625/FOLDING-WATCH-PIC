@@ -420,16 +420,16 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   }
 
   // 日付・曜日 (左下、分リング r=113 の外側。分の数字が下に来たため)。
-  // 曜日は色帯と同じ色・日付と同じ大きさ(GOTHIC_28_BOLD)にしたため、
-  // 曜日の占める高さが増えた分、日付を上へ移動して衝突を避ける
+  // 日付・曜日は横並び (日付→曜日の順)。曜日は色帯と同じ色・日付と同じ
+  // 大きさ(GOTHIC_28_BOLD)
   {
     GColor band_color;
     band_color.argb = s_band_argb;
     char dbuf[8];
     snprintf(dbuf, sizeof(dbuf), "%d", s_mday);
-    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 28, SCREEN_H - 40, 48, DY_SYS);
+    draw_text_mid(ctx, dbuf, s_font_28b, s_sub, 20, SCREEN_H - 18, 36, DY_SYS);
     draw_text_mid(ctx, s_day_names[s_wday], s_font_28b, band_color,
-                 28, SCREEN_H - 18, 48, DY_SYS);
+                 74, SCREEN_H - 18, 64, DY_SYS);
   }
 
   // pebble: バッテリー水平線 (y = CY - BAT_R_OUT) の真上。
